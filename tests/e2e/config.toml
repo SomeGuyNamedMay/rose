@@ -1,0 +1,42 @@
+# Config for the end-to-end tests, independent of the default config so that changing the
+# defaults doesn't break the tests. Tests append [views] rules to it.
+
+[ui]
+border = 4
+gap = 12
+step = 100
+
+[ui.colorscheme]
+background = 0x282C34
+active = 0xFFFFFF
+inactive = 0x465457
+grouped = 0xFDAF53
+insert = 0xE3C3FA
+conflict = 0xED6B32
+
+[layouts]
+s = { left = "single", right = "stack", scale = 0.6 }
+
+[bindings.keyboard]
+"AC+q" = "quit"
+"AC+r" = "reload"
+"A+1" = "workspace-switch-to-sheet-1"
+"A+2" = "workspace-switch-to-sheet-2"
+"A+BackSpace" = "workspace-switch-to-sheet-alternate"
+"AS+0" = "view-pin-to-sheet-0"
+"AS+2" = "view-pin-to-sheet-2"
+"A+j" = "view-cycle-next"
+"A+f" = "view-toggle-maximize-full"
+"AC+l" = "view-snap-right"
+"A+l" = "mode-enter-layout"
+"AS+Return" = "layout-exchange-view-main"
+"A+g" = "mode-enter-group-assign"
+"A+m" = "mode-enter-mark-assign"
+"A+apostrophe" = "mode-enter-mark-select"
+"AS+apostrophe" = "mode-enter-mark-switch-select"
+"AS+i" = "mode-enter-input-grab"
+"AS+e" = "mode-enter-resize"
+
+[bindings.mouse]
+"A+left" = "mode-enter-move"
+"A+right" = "mode-enter-resize"

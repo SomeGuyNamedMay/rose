@@ -1,0 +1,155 @@
+# Rose configuration.
+#
+# Copy this file to ~/.config/rose/config.toml to customize it; reload with the `reload` action.
+# It is modeled on hikari's configuration, so hikari's manual applies to most of it.
+
+[ui]
+border = 1
+gap = 5
+step = 100
+
+# Colors are 0xRRGGBB or "#RRGGBB".
+[ui.colorscheme]
+background = 0x282C34
+active = 0xFFFFFF
+inactive = 0x465457
+grouped = 0xFDAF53
+insert = 0xE3C3FA
+conflict = 0xED6B32
+
+# Commands bound as `action-<name>`. They run through `sh -c`.
+[actions]
+terminal = "foot"
+
+# Commands run when selecting a mark that isn't bound to any view.
+[marks]
+# t = "foot"
+
+# Layout registers a-z are applied with `layout-apply-<register>` or in layout mode.
+# Registers 0-9 are each sheet's default layout, used by `layout-restack-*` when the sheet has
+# no layout yet.
+#
+# A layout is a container (empty, single, full, stack, queue, grid), optionally capped like
+# `{ views = 3, layout = "queue" }`, or a split with two sides: `left`/`right` or `top`/`bottom`.
+# The side written first is dominant: it fills up with views first, and `scale` (0.1-0.9) is its
+# share of the space. `scale = { min = 0.5, max = 0.8 }` follows the first view's size instead.
+[layouts]
+s = { left = "single", right = "stack", scale = 0.6 }
+q = "queue"
+f = "full"
+g = "grid"
+m = { top = "single", bottom = { views = 4, layout = "queue" }, scale = 0.7 }
+"1" = { left = "single", right = "stack", scale = 0.6 }
+
+# Rules for new views, keyed by app id. A view's group defaults to its app id.
+[views]
+# [views.firefox]
+# sheet = 2
+# group = "web"
+# mark = "f"
+# floating = false
+# invisible = false
+# position = { x = 100, y = 100 }
+
+[inputs.keyboard]
+repeat-delay = 600
+repeat-rate = 25
+# xkb = { layout = "us", options = "caps:escape" }
+
+# Bindings are `"<modifiers>+<keysym>"` or `"<modifiers>-<keycode>"`. Modifiers are L (logo),
+# S (shift), C (control), A (alt) and 5 (AltGr); use 0 for none. Keysyms are unshifted, so
+# Alt+Shift+1 is "AS+1". `wev` shows keysym names.
+#
+# hikari uses the logo key, but these defaults use Alt because desktops like GNOME reserve most
+# logo shortcuts while Rose runs nested inside them.
+[bindings.keyboard]
+"A+Return" = "action-terminal"
+"AS+q" = "view-quit"
+"AC+q" = "quit"
+"AC+r" = "reload"
+
+"A+1" = "workspace-switch-to-sheet-1"
+"A+2" = "workspace-switch-to-sheet-2"
+"A+3" = "workspace-switch-to-sheet-3"
+"A+4" = "workspace-switch-to-sheet-4"
+"A+5" = "workspace-switch-to-sheet-5"
+"A+6" = "workspace-switch-to-sheet-6"
+"A+7" = "workspace-switch-to-sheet-7"
+"A+8" = "workspace-switch-to-sheet-8"
+"A+9" = "workspace-switch-to-sheet-9"
+"A+0" = "workspace-switch-to-sheet-0"
+"A+BackSpace" = "workspace-switch-to-sheet-alternate"
+"A+bracketright" = "workspace-switch-to-sheet-next-inhabited"
+"A+bracketleft" = "workspace-switch-to-sheet-prev-inhabited"
+"A+w" = "workspace-show-all"
+"AS+w" = "workspace-clear"
+
+"AS+1" = "view-pin-to-sheet-1"
+"AS+2" = "view-pin-to-sheet-2"
+"AS+3" = "view-pin-to-sheet-3"
+"AS+4" = "view-pin-to-sheet-4"
+"AS+5" = "view-pin-to-sheet-5"
+"AS+6" = "view-pin-to-sheet-6"
+"AS+7" = "view-pin-to-sheet-7"
+"AS+8" = "view-pin-to-sheet-8"
+"AS+9" = "view-pin-to-sheet-9"
+"AS+0" = "view-pin-to-sheet-0"
+"AS+BackSpace" = "view-pin-to-sheet-alternate"
+
+"A+j" = "view-cycle-next"
+"A+k" = "view-cycle-prev"
+"A+r" = "view-raise"
+"AS+r" = "view-lower"
+"A+x" = "view-hide"
+"A+o" = "view-only"
+"A+f" = "view-toggle-maximize-full"
+"A+v" = "view-toggle-maximize-vertical"
+"A+b" = "view-toggle-maximize-horizontal"
+"A+t" = "view-toggle-floating"
+"A+i" = "view-toggle-invisible"
+"A+equal" = "view-reset-geometry"
+"A+c" = "view-move-center"
+"A+Left" = "view-move-left"
+"A+Right" = "view-move-right"
+"A+Up" = "view-move-up"
+"A+Down" = "view-move-down"
+"AS+Right" = "view-increase-size-right"
+"AS+Down" = "view-increase-size-down"
+"AS+Left" = "view-decrease-size-right"
+"AS+Up" = "view-decrease-size-down"
+"AC+h" = "view-snap-left"
+"AC+j" = "view-snap-down"
+"AC+k" = "view-snap-up"
+"AC+l" = "view-snap-right"
+
+"A+period" = "group-cycle-next"
+"A+comma" = "group-cycle-prev"
+"AS+j" = "group-cycle-view-next"
+"AS+k" = "group-cycle-view-prev"
+"A+u" = "group-raise"
+"AS+u" = "group-lower"
+"AS+x" = "group-hide"
+"AS+o" = "group-only"
+
+"A+l" = "mode-enter-layout"
+"AS+l" = "layout-reset"
+"A+a" = "layout-restack-append"
+"AS+a" = "layout-restack-prepend"
+"A+n" = "layout-cycle-view-next"
+"A+p" = "layout-cycle-view-prev"
+"AS+n" = "layout-exchange-view-next"
+"AS+p" = "layout-exchange-view-prev"
+"AS+Return" = "layout-exchange-view-main"
+
+"A+g" = "mode-enter-group-assign"
+"A+m" = "mode-enter-mark-assign"
+"A+apostrophe" = "mode-enter-mark-select"
+"AS+apostrophe" = "mode-enter-mark-switch-select"
+"A+s" = "mode-enter-sheet-assign"
+"AS+i" = "mode-enter-input-grab"
+"AS+m" = "mode-enter-move"
+"AS+e" = "mode-enter-resize"
+
+[bindings.mouse]
+"A+left" = "mode-enter-move"
+"A+right" = "mode-enter-resize"
