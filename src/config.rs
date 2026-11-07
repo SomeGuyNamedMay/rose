@@ -15,6 +15,8 @@ pub const DEFAULT_CONFIG: &str = include_str!("../config.toml");
 
 pub struct Config {
     pub ui: Ui,
+    pub bar: BarConfig,
+    pub menu: MenuConfig,
     pub actions: HashMap<String, String>,
     pub keyboard_bindings: Vec<(KeyBinding, Action)>,
     pub mouse_bindings: Vec<(MouseBinding, Action)>,
@@ -31,6 +33,8 @@ pub struct Config {
 #[serde(default, deny_unknown_fields)]
 struct RawConfig {
     ui: Ui,
+    bar: BarConfig,
+    menu: MenuConfig,
     actions: HashMap<String, String>,
     bindings: RawBindings,
     layouts: toml::Table,
@@ -105,8 +109,86 @@ impl Default for Colorscheme {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BarPosition {
+    Top,
+    Bottom,
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct BarConfig {
+    pub enabled: bool,
+    pub position: BarPosition,
+    /// A font family or a font file, also used by the menu.
+    pub font: String,
+    pub font_size: f32,
+    /// Runs while Rose does; the last line it printed is shown in the bar.
+    pub status_command: Option<String>,
+    pub colors: Theme,
+}
+
+impl Default for BarConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            position: BarPosition::Bottom,
+            font: "monospace".into(),
+            font_size: 14.0,
+            status_command: None,
+            colors: Theme::default(),
+        }
+    }
+}
+
+/// Colors of the bar and menu, named after Nyxt's theme colors.
+#[derive(Clone, Copy, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
+pub struct Theme {
+    pub background: Color,
+    pub text: Color,
+    /// The sheets and mode segments, the menu prompt and its column headers.
+    pub primary: Color,
+    pub on_primary: Color,
+    /// The current sheet, the menu's source heading and dimmed text.
+    pub secondary: Color,
+    pub on_secondary: Color,
+    /// The focused view's title, the selected menu item and matched characters.
+    pub accent: Color,
+    pub on_accent: Color,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            background: Color::rgb(0x1E2127),
+            text: Color::rgb(0xD7DAE0),
+            primary: Color::rgb(0x3E4451),
+            on_primary: Color::rgb(0xFFFFFF),
+            secondary: Color::rgb(0x5C6370),
+            on_secondary: Color::rgb(0xFFFFFF),
+            accent: Color::rgb(0x37A8E4),
+            on_accent: Color::rgb(0x101216),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MenuConfig {
+    /// How many items the menu shows at once.
+    pub lines: usize,
+}
+
+impl Default for MenuConfig {
+    fn default() -> Self {
+        Self { lines: 10 }
+    }
+}
+
 /// An opaque color, written as `0xRRGGBB` or `"#RRGGBB"`.
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(try_from = "RawColor")]
 pub struct Color(pub [f32; 4]);
 
@@ -284,6 +366,27 @@ impl KeyBinding {
     }
 }
 
+impl std::fmt::Display for KeyBinding {
+    /// Like `Alt+Shift+d`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let m = self.mods;
+        let names = [
+            (m.logo, "Logo"),
+            (m.ctrl, "Ctrl"),
+            (m.alt, "Alt"),
+            (m.altgr, "AltGr"),
+            (m.shift, "Shift"),
+        ];
+        for (_, name) in names.iter().filter(|(held, _)| *held) {
+            write!(f, "{name}+")?;
+        }
+        match self.key {
+            Key::Sym(sym) => write!(f, "{}", xkb::keysym_get_name(sym)),
+            Key::Code(code) => write!(f, "{code}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MouseBinding {
     pub mods: Modifiers,
@@ -401,6 +504,8 @@ impl Config {
 
         Ok(Self {
             ui: raw.ui,
+            bar: raw.bar,
+            menu: raw.menu,
             actions: raw.actions,
             keyboard_bindings,
             mouse_bindings,

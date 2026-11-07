@@ -125,6 +125,44 @@ impl Layout {
         }
     }
 
+    /// A one-line summary for the layout menu, like `single 60% | stack`: `|` splits left/right,
+    /// `/` splits top/bottom, and the dominant side carries its share of the space.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Container { views, kind } => {
+                let name = format!("{kind:?}").to_lowercase();
+                if *views == DEFAULT_VIEWS {
+                    name
+                } else {
+                    format!("{name}({views})")
+                }
+            }
+            Self::Split(split) => {
+                let side = |layout: &Layout, dominant: bool| {
+                    let text = match layout {
+                        Self::Split(_) => format!("({})", layout.describe()),
+                        _ => layout.describe(),
+                    };
+                    if !dominant {
+                        return text;
+                    }
+                    match split.scale {
+                        Scale::Fixed(scale) => format!("{text} {:.0}%", scale * 100.0),
+                        Scale::Dynamic { min, max } => {
+                            format!("{text} {:.0}-{:.0}%", min * 100.0, max * 100.0)
+                        }
+                    }
+                };
+                let separator = if split.vertical { "|" } else { "/" };
+                format!(
+                    "{} {separator} {}",
+                    side(&split.first, split.first_dominant),
+                    side(&split.second, !split.first_dominant)
+                )
+            }
+        }
+    }
+
     fn capacity(&self) -> usize {
         match self {
             Self::Split(split) => split
@@ -325,6 +363,30 @@ mod tests {
 
     fn sizes(n: usize) -> Vec<Size<i32, Logical>> {
         vec![(100, 100).into(); n]
+    }
+
+    #[test]
+    fn describe() {
+        let describe = |src| layout(src).describe();
+        assert_eq!(describe(r#""grid""#), "grid");
+        assert_eq!(
+            describe(r#"{ left = "single", right = "stack", scale = 0.6 }"#),
+            "single 60% | stack"
+        );
+        assert_eq!(
+            describe(r#"{ right = "single", left = "stack", scale = 0.7 }"#),
+            "stack | single 70%"
+        );
+        assert_eq!(
+            describe(
+                r#"{ top = "single", bottom = { views = 4, layout = "queue" }, scale = 0.7 }"#
+            ),
+            "single 70% / queue(4)"
+        );
+        assert_eq!(
+            describe(r#"{ left = "single", right = { top = "full", bottom = "grid" } }"#),
+            "single 50% | (full 50% / grid)"
+        );
     }
 
     #[test]

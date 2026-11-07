@@ -12,7 +12,7 @@ mod client;
 mod harness;
 mod input;
 
-use harness::{Session, ACTIVE, BACKGROUND, CONFLICT, GROUPED, INACTIVE, INSERT};
+use harness::{Session, ACTIVE, BACKGROUND, CONFLICT, GROUPED, INACTIVE, INSERT, OUTPUT_HEIGHT};
 use input::Button;
 
 const RED: [u8; 3] = [0xFF, 0x00, 0x00];
@@ -54,6 +54,7 @@ fn tiled_session() -> (Session, Vec<client::Client>) {
     ];
     s.input.key(&["alt", "l"]);
     s.input.key(&["s"]);
+    s.input.key(&["return"]);
     (s, clients)
 }
 
@@ -306,4 +307,85 @@ fn quit_closes_views_then_exits() {
         clients.iter().all(|c| c.is_closed()),
         "not every view was asked to close"
     );
+}
+
+/// The default theme's background, behind the bar and the menu's items.
+const BAR_BACKGROUND: [u8; 3] = [0x1E, 0x21, 0x27];
+/// The default theme's `secondary`, behind the current sheet's number.
+const CURRENT_SHEET: [u8; 3] = [0x5C, 0x63, 0x70];
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn bar_reserves_space_and_switches_sheets() {
+    let mut s = Session::start("[bar]\n");
+    let _red = s.client("red", RED, (200, 150));
+    s.wait_pixel(600, OUTPUT_HEIGHT - 2, BAR_BACKGROUND);
+
+    // The bar's height depends on the font, so find its top edge.
+    let shot = s.screenshot();
+    let top = (0..OUTPUT_HEIGHT)
+        .rev()
+        .find(|&y| shot.pixel(600, y) != BAR_BACKGROUND)
+        .unwrap()
+        + 1;
+    assert!(
+        top < OUTPUT_HEIGHT - 10,
+        "the bar is only {} px high",
+        OUTPUT_HEIGHT - top
+    );
+
+    // Maximized views stop a gap and a border above the bar.
+    s.input.key(&["alt", "f"]);
+    at(&s, (600, top - 17), RED);
+    at(&s, (600, top - 16), ACTIVE);
+    at(&s, (600, top - 1), BACKGROUND);
+
+    // Clicking a sheet in the bar switches to it. Sheet 2 comes right after the current sheet 1.
+    s.input.key(&["alt", "shift", "2"]);
+    at(&s, (600, 400), BACKGROUND);
+    let shot = s.screenshot();
+    let y = top + 2;
+    let start = (0..600)
+        .find(|&x| shot.pixel(x, y) == CURRENT_SHEET)
+        .unwrap();
+    let end = (start..600)
+        .find(|&x| shot.pixel(x, y) != CURRENT_SHEET)
+        .unwrap();
+    s.input.click(end + (end - start) / 2, y);
+    at(&s, (600, 400), RED);
+}
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn menu_switches_views_and_runs_actions() {
+    let (mut s, _clients) = floating_session();
+    // The menu opens at the bottom of the output, covering this point.
+    let menu = (600, 790);
+
+    // Choosing a view on another sheet switches to it.
+    s.input.key(&["alt", "shift", "2"]);
+    at(&s, BLUE_CENTER, BACKGROUND);
+    s.input.key(&["alt", "slash"]);
+    at(&s, menu, BAR_BACKGROUND);
+    s.input.type_text("blue");
+    s.input.key(&["return"]);
+    at(&s, BLUE_CENTER, BLUE);
+    at(&s, RED_CENTER, BACKGROUND);
+    at(&s, menu, BACKGROUND);
+
+    s.input.key(&["alt", "semicolon"]);
+    s.input.type_text("maximize full");
+    s.input.key(&["return"]);
+    at(&s, (600, 300), BLUE);
+
+    // Escape and clicking outside close the menu without doing anything.
+    s.input.key(&["alt", "semicolon"]);
+    at(&s, (600, 700), BAR_BACKGROUND);
+    s.input.type_text("quit");
+    s.input.key(&["escape"]);
+    at(&s, (600, 700), BLUE);
+    s.input.key(&["alt", "slash"]);
+    at(&s, (600, 700), BAR_BACKGROUND);
+    s.input.click(600, 100);
+    at(&s, (600, 700), BLUE);
 }

@@ -7,7 +7,10 @@ use smithay::{
     input::keyboard::Keysym,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER},
-    wayland::{compositor::with_states, shell::xdg::XdgToplevelSurfaceData},
+    wayland::{
+        compositor::with_states,
+        shell::xdg::{XdgToplevelSurfaceData, XdgToplevelSurfaceRoleAttributes},
+    },
 };
 
 use crate::{
@@ -35,14 +38,14 @@ pub enum Mode {
     MarkSelect {
         switch: bool,
     },
-    /// Waiting for a layout register.
-    Layout,
     /// Waiting for a sheet number to move the focused view to.
     SheetAssign,
     /// All keys go to the focused view until `exit` is pressed again.
     InputGrab {
         exit: KeyBinding,
     },
+    /// The menu is open and gets all keys.
+    Menu,
     /// Moving or resizing the focused view with the pointer until a key is released.
     Move,
     Resize,
@@ -51,7 +54,7 @@ pub enum Mode {
 impl Mode {
     /// Whether the mode is waiting for input, shown with the insert border color.
     pub fn is_insert(&self) -> bool {
-        !matches!(self, Self::Normal | Self::Move | Self::Resize)
+        !matches!(self, Self::Normal | Self::Move | Self::Resize | Self::Menu)
     }
 }
 
@@ -112,6 +115,25 @@ impl View {
     fn tileable(&self, sheet: u8) -> bool {
         self.placed && self.sheet == sheet && !self.floating && !self.invisible
     }
+}
+
+fn toplevel_data<T>(window: &Window, f: impl FnOnce(&XdgToplevelSurfaceRoleAttributes) -> T) -> T {
+    with_states(window.toplevel().unwrap().wl_surface(), |states| {
+        f(&states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .unwrap()
+            .lock()
+            .unwrap())
+    })
+}
+
+pub fn title(window: &Window) -> String {
+    toplevel_data(window, |data| data.title.clone()).unwrap_or_default()
+}
+
+pub fn app_id(window: &Window) -> String {
+    toplevel_data(window, |data| data.app_id.clone()).unwrap_or_default()
 }
 
 /// Runs a shell command without waiting for it.
@@ -192,17 +214,9 @@ impl Rose {
         Rectangle::new(location, window.geometry().size)
     }
 
-    fn output_area(&self) -> Rectangle<i32, Logical> {
-        self.space
-            .outputs()
-            .next()
-            .and_then(|o| self.space.output_geometry(o))
-            .unwrap_or_default()
-    }
-
-    /// The output minus the gap around its edge.
+    /// The work area minus the gap around its edge.
     fn usable_area(&self) -> Rectangle<i32, Logical> {
-        shrink(self.output_area(), self.config.ui.gap)
+        shrink(self.work_area(), self.config.ui.gap)
     }
 
     /// Where view content can go so that borders stay inside the usable area.
@@ -336,13 +350,7 @@ impl Rose {
 
     /// Places a view once its first buffer has arrived, applying any view rule for its app id.
     pub fn place_view(&mut self, window: &Window) {
-        let app_id = with_states(window.toplevel().unwrap().wl_surface(), |states| {
-            states
-                .data_map
-                .get::<XdgToplevelSurfaceData>()
-                .and_then(|data| data.lock().unwrap().app_id.clone())
-        })
-        .unwrap_or_default();
+        let app_id = app_id(window);
         let rule = self.config.views.get(&app_id).cloned().unwrap_or_default();
 
         let size = window.geometry().size;
@@ -398,7 +406,8 @@ impl Rose {
 
     pub fn remove_view(&mut self, window: &Window) {
         // Modes act on the focused view, so end them when it goes away.
-        if self.focused.as_ref() == Some(window) && !matches!(self.mode, Mode::Normal) {
+        if self.focused.as_ref() == Some(window) && !matches!(self.mode, Mode::Normal | Mode::Menu)
+        {
             let pointer = self.seat.get_pointer().unwrap();
             if pointer.is_grabbed() {
                 pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), 0);
@@ -656,7 +665,7 @@ impl Rose {
         let border = self.config.ui.border;
 
         // Each tile is followed by a gap, so leave one before the first tile too.
-        let output = self.output_area();
+        let output = self.work_area();
         let area = Rectangle::new(
             output.loc + Point::from((gap, gap)),
             Size::from((output.size.w - gap, output.size.h - gap)),
@@ -976,6 +985,12 @@ impl Rose {
             }
             return;
         };
+        self.show_view(&window, switch);
+    }
+
+    /// Shows and focuses a view, switching to its sheet first if `switch` is set.
+    pub fn show_view(&mut self, window: &Window, switch: bool) {
+        let window = window.clone();
         if switch {
             let sheet = self.view(&window).map_or(0, |v| v.sheet);
             if sheet != 0 && sheet != self.current_sheet {
@@ -1003,10 +1018,7 @@ impl Rose {
 
     fn enter_mode(&mut self, kind: ModeKind, trigger: Option<KeyBinding>) {
         if self.focused.is_none()
-            && !matches!(
-                kind,
-                ModeKind::Layout | ModeKind::MarkSelect | ModeKind::MarkSwitchSelect
-            )
+            && !matches!(kind, ModeKind::MarkSelect | ModeKind::MarkSwitchSelect)
         {
             return;
         }
@@ -1017,7 +1029,6 @@ impl Rose {
             ModeKind::MarkAssign => Mode::MarkAssign { input: None },
             ModeKind::MarkSelect => Mode::MarkSelect { switch: false },
             ModeKind::MarkSwitchSelect => Mode::MarkSelect { switch: true },
-            ModeKind::Layout => Mode::Layout,
             ModeKind::SheetAssign => Mode::SheetAssign,
             ModeKind::InputGrab => match trigger {
                 Some(exit) => Mode::InputGrab { exit },
@@ -1079,12 +1090,6 @@ impl Rose {
                     self.mark_show(mark, switch);
                 }
             }
-            Mode::Layout => {
-                if let Some(register) = ch.filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-                {
-                    self.layout_apply(register);
-                }
-            }
             Mode::SheetAssign => {
                 if let (Some(window), Some(sheet)) = (focused, ch.and_then(|c| c.to_digit(10))) {
                     self.pin_to_sheet(&window, SheetTarget::Number(sheet as u8));
@@ -1137,6 +1142,11 @@ impl Rose {
         };
         let keyboard_changed = config.keyboard != self.config.keyboard;
         self.config = config;
+        self.bar.configure(&self.config.bar);
+        if let Some(menu) = &mut self.menu {
+            menu.lines = self.config.menu.lines.max(1);
+            menu.dirty = true;
+        }
 
         if keyboard_changed {
             let settings = self.config.keyboard.clone();
@@ -1210,6 +1220,7 @@ impl Rose {
             Action::MarkSwitchTo(mark) => self.mark_show(mark, true),
 
             Action::EnterMode(kind) => self.enter_mode(kind, trigger),
+            Action::Menu(source) => self.open_menu(source),
 
             Action::SheetShowAll => self.set_workspace(|v| v.sheet == current),
             Action::SheetShowGroup => {

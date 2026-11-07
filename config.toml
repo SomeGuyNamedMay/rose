@@ -17,7 +17,38 @@ grouped = 0xFDAF53
 insert = 0xE3C3FA
 conflict = 0xED6B32
 
-# Commands bound as `action-<name>`. They run through `sh -c`.
+# The bar, styled after Nyxt's status buffer. From left to right it shows the sheets in use (click
+# one to switch to it), the focused view, the other visible views (click one to focus it), the
+# status line and the mode, including anything typed into the mode so far.
+[bar]
+enabled = true
+position = "bottom"  # or "top"
+font = "monospace"   # a font family, or the path of a font file; the menu uses it too
+font-size = 14
+# Runs while Rose does; the last line it printed is shown in the bar.
+status-command = "while date +'%a %d %b  %H:%M'; do sleep 5; done"
+
+# Colors of the bar and menu, named after Nyxt's theme colors.
+[bar.colors]
+background = 0x1E2127
+text = 0xD7DAE0
+primary = 0x3E4451       # the sheets and mode, the menu prompt and column headers
+on-primary = 0xFFFFFF
+secondary = 0x5C6370     # the current sheet, the menu's source heading
+on-secondary = 0xFFFFFF
+accent = 0x37A8E4        # the focused view, the selected menu item and matched characters
+on-accent = 0x101216
+
+# The menu is a launcher like rofi, styled after Nyxt's prompt buffer. It opens next to the bar
+# with `menu-applications` (desktop entries), `menu-run` (programs in PATH), `menu-views` or
+# `menu-actions`. Type to filter; Up/Down, Tab or Ctrl+N/P select; Return or a click accepts;
+# Escape, Ctrl+G or a click elsewhere closes. In `menu-run`, Shift+Return runs the typed text as
+# a command, which Return also does when nothing matches. Ctrl+A/E/U/K/W edit like a shell.
+[menu]
+lines = 10
+
+# Commands bound as `action-<name>`. They run through `sh -c`. Applications with `Terminal=true`
+# open with `terminal -e`.
 [actions]
 terminal = "foot"
 
@@ -25,7 +56,7 @@ terminal = "foot"
 [marks]
 # t = "foot"
 
-# Layout registers a-z are applied with `layout-apply-<register>` or in layout mode.
+# Layout registers a-z are applied with `layout-apply-<register>` or from `menu-layouts`.
 # Registers 0-9 are each sheet's default layout, used by `layout-restack-*` when the sheet has
 # no layout yet.
 #
@@ -131,7 +162,7 @@ repeat-rate = 25
 "AS+x" = "group-hide"
 "AS+o" = "group-only"
 
-"A+l" = "mode-enter-layout"
+"A+l" = "menu-layouts"
 "AS+l" = "layout-reset"
 "A+a" = "layout-restack-append"
 "AS+a" = "layout-restack-prepend"
@@ -149,6 +180,11 @@ repeat-rate = 25
 "AS+i" = "mode-enter-input-grab"
 "AS+m" = "mode-enter-move"
 "AS+e" = "mode-enter-resize"
+
+"A+d" = "menu-applications"
+"AS+d" = "menu-run"
+"A+slash" = "menu-views"
+"A+semicolon" = "menu-actions"
 
 [bindings.mouse]
 "A+left" = "mode-enter-move"

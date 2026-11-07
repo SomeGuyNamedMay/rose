@@ -28,7 +28,7 @@ s = { left = "single", right = "stack", scale = 0.6 }
 "A+j" = "view-cycle-next"
 "A+f" = "view-toggle-maximize-full"
 "AC+l" = "view-snap-right"
-"A+l" = "mode-enter-layout"
+"A+l" = "menu-layouts"
 "AS+Return" = "layout-exchange-view-main"
 "A+g" = "mode-enter-group-assign"
 "A+m" = "mode-enter-mark-assign"
@@ -36,6 +36,10 @@ s = { left = "single", right = "stack", scale = 0.6 }
 "AS+apostrophe" = "mode-enter-mark-switch-select"
 "AS+i" = "mode-enter-input-grab"
 "AS+e" = "mode-enter-resize"
+"A+d" = "menu-applications"
+"AS+d" = "menu-run"
+"A+slash" = "menu-views"
+"A+semicolon" = "menu-actions"
 
 [bindings.mouse]
 "A+left" = "mode-enter-move"

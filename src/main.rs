@@ -1,11 +1,14 @@
 mod action;
+mod bar;
 mod config;
 mod grab;
 mod handlers;
 mod input;
 mod layout;
+mod menu;
 mod render;
 mod state;
+mod text;
 mod winit;
 mod wm;
 

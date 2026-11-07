@@ -9,7 +9,11 @@ use smithay::{
     desktop::{PopupManager, Space, Window, WindowSurfaceType},
     input::{keyboard::XkbConfig, pointer::CursorImageStatus, Seat, SeatState},
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        calloop::{
+            channel::{self, Event as ChannelEvent},
+            generic::Generic,
+            EventLoop, Interest, LoopSignal, Mode, PostAction,
+        },
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
@@ -28,7 +32,9 @@ use smithay::{
 };
 
 use crate::{
+    bar::Bar,
     config::Config,
+    menu::Menu,
     wm::{Mode as WmMode, SheetLayout, View},
 };
 
@@ -60,6 +66,8 @@ pub struct Rose {
     pub cursor_status: CursorImageStatus,
     /// Set by the first `quit`; the compositor exits once all views have closed.
     pub quit_requested: bool,
+    pub bar: Bar,
+    pub menu: Option<Menu>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -113,6 +121,19 @@ impl Rose {
             socket_name.to_string_lossy()
         );
 
+        // Lines printed by the bar's status command.
+        let (status_sender, status_channel) = channel::channel();
+        event_loop
+            .handle()
+            .insert_source(status_channel, |event, _, state: &mut Self| {
+                if let ChannelEvent::Msg((generation, line)) = event {
+                    state.bar.set_status(generation, line);
+                }
+            })
+            .expect("failed to insert the status channel");
+        let mut bar = Bar::new(status_sender);
+        bar.configure(&config.bar);
+
         Self {
             start_time: std::time::Instant::now(),
             socket_name,
@@ -137,6 +158,8 @@ impl Rose {
             suppressed_buttons: HashSet::new(),
             cursor_status: CursorImageStatus::default_named(),
             quit_requested: false,
+            bar,
+            menu: None,
 
             compositor_state,
             xdg_shell_state,
@@ -189,6 +212,9 @@ impl Rose {
         &self,
         pos: Point<f64, Logical>,
     ) -> Option<(WlSurface, Point<f64, Logical>)> {
+        if self.over_panels(pos) {
+            return None;
+        }
         self.space
             .element_under(pos)
             .and_then(|(window, location)| {

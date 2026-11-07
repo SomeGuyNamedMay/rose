@@ -32,12 +32,13 @@ most logo-key shortcuts while Rose runs nested inside them. Some highlights:
 | Alt+1 … Alt+0, Alt+BackSpace | switch to a sheet, or to the alternate sheet |
 | Alt+Shift+1 … Alt+Shift+0 | move the focused view to a sheet |
 | Alt+J / Alt+K | cycle views |
-| Alt+L, then a register | apply a layout (`s`, `q`, `f`, `g`, `m` by default) |
+| Alt+L | pick a layout from the menu (`s`, `q`, `f`, `g`, `m` by default) |
 | Alt+A / Alt+Shift+L | add views to the layout / reset the layout |
 | Alt+F | toggle maximize |
 | Alt+G, type a name, Return | assign the focused view to a group |
 | Alt+M, a letter, Return | mark the focused view |
 | Alt+' then a letter | show the marked view |
+| Alt+D / Alt+; | open the application / action menu |
 | Alt+drag / Alt+right-drag | move / resize |
 | Alt+Shift+Q / Alt+Ctrl+Q | close the view / quit |
 
@@ -52,7 +53,7 @@ most logo-key shortcuts while Rose runs nested inside them. Some highlights:
 - **Layouts** are binary split trees of containers (`single`, `stack`, `queue`, `grid`, `full`,
   `empty`) stored in registers. They tile a sheet on demand; new views float until restacked.
   `layout-exchange-view-*` and `layout-cycle-view-*` work on the layout order.
-- **Modes**: group-assign, mark-assign, mark-select, mark-switch-select, layout, sheet-assign,
+- **Modes**: group-assign, mark-assign, mark-select, mark-switch-select, sheet-assign,
   input-grab (all keys go to the focused view until the binding is pressed again), and keyboard
   move/resize (hold the binding and move the pointer; releasing a key ends it). While a mode waits
   for input, the focused view's border uses the `insert` color, or `conflict` for a taken mark.
@@ -67,9 +68,30 @@ All of hikari's actions are available except those that need hardware or multipl
 Rose also supports server-side decorations (`xdg-decoration`), client cursor images, clipboard and
 drag-and-drop, and client-initiated move, resize and maximize.
 
+## Bar and menu
+
+Rose has a built-in bar styled after [Nyxt](https://nyxt-browser.com/)'s status buffer: slanted
+segments for the sheets in use, the focused view's title and the current mode, with the other visible
+views listed like tabs and a status line from `status-command`. Click a sheet or a view to switch to
+it. While a mode waits for input, the bar shows what has been typed in the `insert` color.
+
+The menu is a launcher like rofi, styled after Nyxt's prompt buffer: a prompt with the typed input
+and match count, a heading for the source, and a table of suggestions narrowed down by fuzzy
+matching. It opens next to the bar:
+
+| Keys | Menu |
+| --- | --- |
+| Alt+D | `menu-applications`: desktop entries |
+| Alt+Shift+D | `menu-run`: programs in `PATH`, or any typed command (Shift+Return) |
+| Alt+/ | `menu-views`: switch to a view on any sheet |
+| Alt+; | `menu-actions`: run any action, showing its binding |
+
+Up/Down, Tab or Ctrl+N/P select, Return or a click accepts, and Escape, Ctrl+G or a click elsewhere
+closes it. Fonts and colors are under `[bar]` in the config.
+
 ## Differences from hikari
 
-- No indicator bars, so modes that wait for typed input show their state through border colors only.
+- Instead of indicator bars on each view, one bar shows the focused view and what modes have typed.
 - Single output, nested only; no DRM/libinput backend, layer-shell, XWayland or screen locking.
 - Keyboard move/resize can't warp the host pointer, so they follow pointer movement from wherever it is.
 - Configuration is TOML rather than UCL, with the same structure where it applies.
@@ -89,7 +111,7 @@ cargo test     # unit tests
 mouse input through sway's virtual input protocols, opens test windows that fill themselves with a
 solid color, and checks pixels in screenshots taken with `grim`. They cover tiling, cycling,
 maximizing, sheets, marks, groups, modes, mouse and keyboard move/resize, client-requested
-move/resize, snapping, input grabs, reload and quit.
+move/resize, snapping, input grabs, reload, quit, and the bar and menu.
 
 They need sway and grim, so plain `cargo test` skips them. Run them with:
 

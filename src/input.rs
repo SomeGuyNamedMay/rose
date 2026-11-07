@@ -22,6 +22,7 @@ use crate::{
 enum KeyCommand {
     Action(Action, KeyBinding),
     ModeKey(Keysym),
+    MenuKey(Keysym, ModifiersState),
     ExitInputGrab,
     /// A key was released while moving or resizing with the keyboard.
     EndGrab,
@@ -96,6 +97,18 @@ impl Rose {
             }
             InputEvent::PointerAxis { event, .. } => {
                 let source = event.source();
+                let pointer = self.seat.get_pointer().unwrap();
+                if self.over_panels(pointer.current_location()) {
+                    // Scrolling over the menu moves the selection.
+                    let amount = event
+                        .amount_v120(Axis::Vertical)
+                        .or_else(|| event.amount(Axis::Vertical))
+                        .unwrap_or(0.0);
+                    if let Some(menu) = self.menu.as_mut().filter(|_| amount != 0.0) {
+                        menu.move_selection(amount.signum() as isize);
+                    }
+                    return;
+                }
                 let mut frame = AxisFrame::new(event.time_msec()).source(source);
 
                 for axis in [Axis::Horizontal, Axis::Vertical] {
@@ -154,6 +167,7 @@ impl Rose {
                 Some(KeyCommand::ExitInputGrab)
             }
             Mode::Move | Mode::Resize => None,
+            Mode::Menu => Some(KeyCommand::MenuKey(handle.modified_sym(), *mods)),
             _ => Some(KeyCommand::ModeKey(handle.modified_sym())),
         };
         self.suppressed_keys.insert(code);
@@ -164,6 +178,7 @@ impl Rose {
         match command {
             KeyCommand::Action(action, binding) => self.run_action(action, Some(binding)),
             KeyCommand::ModeKey(sym) => self.handle_mode_key(sym),
+            KeyCommand::MenuKey(sym, mods) => self.handle_menu_key(sym, &mods),
             KeyCommand::ExitInputGrab => self.mode = Mode::Normal,
             KeyCommand::EndGrab => {
                 let pointer = self.seat.get_pointer().unwrap();
@@ -179,8 +194,17 @@ impl Rose {
         if pointer.is_grabbed() {
             return true;
         }
-        let mods = self.seat.get_keyboard().unwrap().modifier_state();
         let location = pointer.current_location();
+        // Clicking outside the menu closes it.
+        if self.panel_click(location) {
+            return false;
+        }
+        if self.menu.is_some() {
+            self.close_menu();
+            return false;
+        }
+
+        let mods = self.seat.get_keyboard().unwrap().modifier_state();
         let under = self.space.element_under(location).map(|(w, _)| w.clone());
 
         let Some(action) = self.config.mouse_action(&mods, button) else {

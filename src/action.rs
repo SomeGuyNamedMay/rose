@@ -50,13 +50,27 @@ pub enum Align {
 pub enum ModeKind {
     GroupAssign,
     InputGrab,
-    Layout,
     MarkAssign,
     MarkSelect,
     MarkSwitchSelect,
     Move,
     Resize,
     SheetAssign,
+}
+
+/// What a menu lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MenuSource {
+    /// Desktop entries.
+    Applications,
+    /// Executables in `PATH`.
+    Run,
+    /// Views, to switch to one.
+    Views,
+    /// Actions, to run one.
+    Actions,
+    /// Layout registers, to apply one.
+    Layouts,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +99,7 @@ pub enum Action {
     MarkSwitchTo(char),
 
     EnterMode(ModeKind),
+    Menu(MenuSource),
 
     SheetShowAll,
     SheetShowGroup,
@@ -185,7 +200,6 @@ fn mode(s: &str) -> Option<ModeKind> {
     Some(match s {
         "group-assign" => ModeKind::GroupAssign,
         "input-grab" => ModeKind::InputGrab,
-        "layout" => ModeKind::Layout,
         "mark-assign" => ModeKind::MarkAssign,
         "mark-select" => ModeKind::MarkSelect,
         "mark-switch-select" => ModeKind::MarkSwitchSelect,
@@ -196,65 +210,164 @@ fn mode(s: &str) -> Option<ModeKind> {
     })
 }
 
+/// Actions whose names take no argument.
+fn fixed_actions() -> Vec<(&'static str, Action)> {
+    use Action::*;
+    vec![
+        ("quit", Quit),
+        ("reload", Reload),
+        ("group-cycle-next", GroupCycle(Cycle::Next)),
+        ("group-cycle-prev", GroupCycle(Cycle::Prev)),
+        ("group-hide", GroupHide),
+        ("group-lower", GroupLower),
+        ("group-raise", GroupRaise),
+        ("group-only", GroupOnly),
+        (
+            "layout-exchange-view-next",
+            LayoutExchangeView(Exchange::Next),
+        ),
+        (
+            "layout-exchange-view-prev",
+            LayoutExchangeView(Exchange::Prev),
+        ),
+        (
+            "layout-exchange-view-main",
+            LayoutExchangeView(Exchange::Main),
+        ),
+        ("layout-reset", LayoutReset),
+        ("layout-restack-append", LayoutRestack { append: true }),
+        ("layout-restack-prepend", LayoutRestack { append: false }),
+        ("sheet-show-all", SheetShowAll),
+        ("sheet-show-group", SheetShowGroup),
+        ("sheet-show-invisible", SheetShowInvisible),
+        ("view-cycle-next", ViewCycle(Cycle::Next)),
+        ("view-cycle-prev", ViewCycle(Cycle::Prev)),
+        ("view-hide", ViewHide),
+        ("view-lower", ViewLower),
+        ("view-raise", ViewRaise),
+        ("view-only", ViewOnly),
+        ("view-quit", ViewQuit),
+        ("view-reset-geometry", ViewResetGeometry),
+        ("view-toggle-floating", ViewToggleFloating),
+        ("view-toggle-invisible", ViewToggleInvisible),
+        (
+            "view-toggle-maximize-full",
+            ViewToggleMaximize {
+                horizontal: true,
+                vertical: true,
+            },
+        ),
+        (
+            "view-toggle-maximize-horizontal",
+            ViewToggleMaximize {
+                horizontal: true,
+                vertical: false,
+            },
+        ),
+        (
+            "view-toggle-maximize-vertical",
+            ViewToggleMaximize {
+                horizontal: false,
+                vertical: true,
+            },
+        ),
+        ("workspace-clear", WorkspaceClear),
+        ("workspace-show-all", WorkspaceShowAll),
+        ("workspace-show-group", WorkspaceShowGroup),
+        ("workspace-show-invisible", WorkspaceShowInvisible),
+        (
+            "workspace-switch-to-sheet-next-inhabited",
+            WorkspaceSwitchInhabited { next: true },
+        ),
+        (
+            "workspace-switch-to-sheet-prev-inhabited",
+            WorkspaceSwitchInhabited { next: false },
+        ),
+    ]
+}
+
+/// The name of every action, for the action menu. Commands, marks and layout registers are left
+/// out; the menu adds the ones that are configured.
+pub fn all_names() -> Vec<String> {
+    let mut names: Vec<String> = fixed_actions()
+        .into_iter()
+        .map(|(name, _)| name.to_string())
+        .collect();
+    let with = |prefix: &str, args: &[&str]| -> Vec<String> {
+        args.iter().map(|arg| format!("{prefix}{arg}")).collect()
+    };
+    let sheets = [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "alternate",
+    ];
+    let directions = ["up", "down", "left", "right"];
+    let cycles = ["next", "prev", "first", "last"];
+    names.extend(with("group-cycle-view-", &cycles));
+    names.extend(with("layout-cycle-view-", &cycles));
+    names.extend(with("menu-", &["applications", "run", "views", "actions", "layouts"]));
+    names.extend(with(
+        "mode-enter-",
+        &[
+            "group-assign",
+            "mark-assign",
+            "mark-select",
+            "mark-switch-select",
+            "move",
+            "resize",
+            "sheet-assign",
+        ],
+    ));
+    names.extend(with("view-increase-size-", &directions));
+    names.extend(with("view-decrease-size-", &directions));
+    names.extend(with("view-move-", &directions));
+    names.extend(with(
+        "view-move-",
+        &[
+            "center",
+            "center-left",
+            "center-right",
+            "top-left",
+            "top-middle",
+            "top-right",
+            "bottom-left",
+            "bottom-middle",
+            "bottom-right",
+        ],
+    ));
+    names.extend(with("view-pin-to-sheet-", &sheets));
+    names.extend(with("view-snap-", &directions));
+    names.extend(with("workspace-switch-to-sheet-", &sheets));
+    names.sort();
+    names
+}
+
+fn menu_source(s: &str) -> Option<MenuSource> {
+    Some(match s {
+        "applications" => MenuSource::Applications,
+        "run" => MenuSource::Run,
+        "views" => MenuSource::Views,
+        "actions" => MenuSource::Actions,
+        "layouts" => MenuSource::Layouts,
+        _ => return None,
+    })
+}
+
 impl FromStr for Action {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Action::*;
 
-        let fixed = match s {
-            "quit" => Some(Quit),
-            "reload" => Some(Reload),
-            "group-cycle-next" => Some(GroupCycle(Cycle::Next)),
-            "group-cycle-prev" => Some(GroupCycle(Cycle::Prev)),
-            "group-hide" => Some(GroupHide),
-            "group-lower" => Some(GroupLower),
-            "group-raise" => Some(GroupRaise),
-            "group-only" => Some(GroupOnly),
-            "layout-exchange-view-next" => Some(LayoutExchangeView(Exchange::Next)),
-            "layout-exchange-view-prev" => Some(LayoutExchangeView(Exchange::Prev)),
-            "layout-exchange-view-main" => Some(LayoutExchangeView(Exchange::Main)),
-            "layout-reset" => Some(LayoutReset),
-            "layout-restack-append" => Some(LayoutRestack { append: true }),
-            "layout-restack-prepend" => Some(LayoutRestack { append: false }),
-            "sheet-show-all" => Some(SheetShowAll),
-            "sheet-show-group" => Some(SheetShowGroup),
-            "sheet-show-invisible" => Some(SheetShowInvisible),
-            "view-cycle-next" => Some(ViewCycle(Cycle::Next)),
-            "view-cycle-prev" => Some(ViewCycle(Cycle::Prev)),
-            "view-hide" => Some(ViewHide),
-            "view-lower" => Some(ViewLower),
-            "view-raise" => Some(ViewRaise),
-            "view-only" => Some(ViewOnly),
-            "view-quit" => Some(ViewQuit),
-            "view-reset-geometry" => Some(ViewResetGeometry),
-            "view-toggle-floating" => Some(ViewToggleFloating),
-            "view-toggle-invisible" => Some(ViewToggleInvisible),
-            "view-toggle-maximize-full" => Some(ViewToggleMaximize {
-                horizontal: true,
-                vertical: true,
-            }),
-            "view-toggle-maximize-horizontal" => Some(ViewToggleMaximize {
-                horizontal: true,
-                vertical: false,
-            }),
-            "view-toggle-maximize-vertical" => Some(ViewToggleMaximize {
-                horizontal: false,
-                vertical: true,
-            }),
-            "workspace-clear" => Some(WorkspaceClear),
-            "workspace-show-all" => Some(WorkspaceShowAll),
-            "workspace-show-group" => Some(WorkspaceShowGroup),
-            "workspace-show-invisible" => Some(WorkspaceShowInvisible),
-            "workspace-switch-to-sheet-next-inhabited" => {
-                Some(WorkspaceSwitchInhabited { next: true })
-            }
-            "workspace-switch-to-sheet-prev-inhabited" => {
-                Some(WorkspaceSwitchInhabited { next: false })
-            }
-            _ => None,
-        };
-        if let Some(action) = fixed {
+        if let Some((_, action)) = fixed_actions().into_iter().find(|(name, _)| *name == s) {
             return Ok(action);
         }
 
@@ -272,6 +385,8 @@ impl FromStr for Action {
             mark(rest).map(MarkShow)
         } else if let Some(rest) = s.strip_prefix("mark-switch-to-") {
             mark(rest).map(MarkSwitchTo)
+        } else if let Some(rest) = s.strip_prefix("menu-") {
+            menu_source(rest).map(Menu)
         } else if let Some(rest) = s.strip_prefix("mode-enter-") {
             mode(rest).map(EnterMode)
         } else if let Some(rest) = s.strip_prefix("view-increase-size-") {
@@ -299,5 +414,21 @@ impl FromStr for Action {
         };
 
         parsed.ok_or_else(|| format!("unknown action `{s}`"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_name_parses() {
+        for name in all_names() {
+            assert!(name.parse::<Action>().is_ok(), "{name}");
+        }
+        assert_eq!(
+            "menu-run".parse::<Action>(),
+            Ok(Action::Menu(MenuSource::Run))
+        );
     }
 }

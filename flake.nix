@@ -74,6 +74,7 @@
             export LD_LIBRARY_PATH=${pkgs.lib.makeLibraryPath (runtimeLibs pkgs)}
             export __EGL_VENDOR_LIBRARY_DIRS=${pkgs.mesa}/share/glvnd/egl_vendor.d
             export LIBGL_ALWAYS_SOFTWARE=1 WLR_RENDERER=pixman
+            export FONTCONFIG_FILE=${pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; }}
           '';
         });
       });

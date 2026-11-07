@@ -1,8 +1,10 @@
-//! Builds the frame: views in stacking order with their borders, and the client's cursor.
+//! Builds the frame: the menu and bar, views in stacking order with their borders, and the
+//! client's cursor.
 
 use smithay::{
     backend::renderer::{
         element::{
+            memory::MemoryRenderBufferRenderElement,
             solid::SolidColorRenderElement,
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
             AsRenderElements, Kind,
@@ -20,6 +22,7 @@ smithay::backend::renderer::element::render_elements! {
     pub RoseRenderElement<=GlesRenderer>;
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Solid=SolidColorRenderElement,
+    Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
 }
 
 impl Rose {
@@ -52,6 +55,8 @@ impl Rose {
                 Kind::Cursor,
             ));
         }
+
+        elements.extend(self.panel_elements(renderer));
 
         let border = self.config.ui.border;
         let windows: Vec<_> = self.space.elements().rev().cloned().collect();

@@ -75,8 +75,15 @@ impl Session {
             &dir.join("sway.log"),
         );
 
+        // The bar would change the geometry most tests expect, so it's off unless a test
+        // configures it.
+        let bar = if extra_config.contains("[bar]") {
+            ""
+        } else {
+            "[bar]\nenabled = false\n"
+        };
         let config_path = dir.join("config.toml");
-        std::fs::write(&config_path, format!("{BASE_CONFIG}\n{extra_config}")).unwrap();
+        std::fs::write(&config_path, format!("{BASE_CONFIG}\n{bar}{extra_config}")).unwrap();
 
         let rose = Command::new(env!("CARGO_BIN_EXE_rose"))
             .arg("--config")
@@ -107,7 +114,7 @@ impl Session {
             _serial: serial,
         };
         // Rose's window fills the output once sway has tiled it.
-        session.wait_pixel(OUTPUT_WIDTH - 2, OUTPUT_HEIGHT - 2, BACKGROUND);
+        session.wait_pixel(OUTPUT_WIDTH - 2, OUTPUT_HEIGHT / 2, BACKGROUND);
         session
     }
 

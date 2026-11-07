@@ -115,7 +115,7 @@ impl VirtualInput {
         }
     }
 
-    /// Types lowercase letters and digits.
+    /// Types lowercase letters, digits, spaces and dashes.
     pub fn type_text(&mut self, text: &str) {
         for c in text.chars() {
             self.key(&[&c.to_string()]);
@@ -169,7 +169,7 @@ fn code(name: &str) -> u32 {
     match name {
         "escape" => 1,
         "0" => 11,
-        "minus" => 12,
+        "minus" | "-" => 12,
         "equal" => 13,
         "backspace" => 14,
         "tab" => 15,
@@ -177,12 +177,14 @@ fn code(name: &str) -> u32 {
         "bracketright" => 27,
         "return" => 28,
         "ctrl" => 29,
+        "semicolon" => 39,
         "apostrophe" => 40,
         "shift" => 42,
         "comma" => 51,
         "period" => 52,
+        "slash" => 53,
         "alt" => 56,
-        "space" => 57,
+        "space" | " " => 57,
         "up" => 103,
         "left" => 105,
         "right" => 106,
