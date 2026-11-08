@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Rose
+Comment=A window manager modeled on hikari
+Exec=@rose@
+Type=Application
+DesktopNames=rose
