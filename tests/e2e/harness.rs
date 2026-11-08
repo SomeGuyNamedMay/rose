@@ -33,6 +33,7 @@ static SERIAL: Mutex<()> = Mutex::new(());
 pub struct Session {
     dir: PathBuf,
     sway: Child,
+    bus: Child,
     rose: Child,
     rose_socket: PathBuf,
     pub config_path: PathBuf,
@@ -85,12 +86,46 @@ impl Session {
         let config_path = dir.join("config.toml");
         std::fs::write(&config_path, format!("{BASE_CONFIG}\n{bar}{extra_config}")).unwrap();
 
+        // Rose offers a portal on the session bus, so give it a bus of its own.
+        let bus_socket = dir.join("bus");
+        let bus_config = dir.join("bus.conf");
+        std::fs::write(
+            &bus_config,
+            format!(
+                "<busconfig><type>session</type>\
+                 <listen>unix:path={}</listen><auth>EXTERNAL</auth>\
+                 <policy context=\"default\"><allow send_destination=\"*\"/><allow eavesdrop=\"true\"/>\
+                 <allow own=\"*\"/></policy></busconfig>",
+                bus_socket.display()
+            ),
+        )
+        .unwrap();
+        let bus = Command::new("dbus-daemon")
+            .arg("--nofork")
+            .arg(format!("--config-file={}", bus_config.display()))
+            .stdout(log_file(&dir, "dbus.log"))
+            .stderr(log_file(&dir, "dbus.log"))
+            .spawn()
+            .expect(
+                "failed to start dbus-daemon; the e2e tests need it on PATH (use `nix develop`)",
+            );
+        wait_for(
+            || bus_socket.exists(),
+            "the session bus to start",
+            &dir.join("dbus.log"),
+        );
+
         let rose = Command::new(env!("CARGO_BIN_EXE_rose"))
             .arg("--config")
             .arg(&config_path)
             .env("XDG_RUNTIME_DIR", &dir)
             .env("WAYLAND_DISPLAY", "wayland-1")
             .env("NO_COLOR", "1")
+            .env("XDG_STATE_HOME", &dir)
+            .env(
+                "DBUS_SESSION_BUS_ADDRESS",
+                format!("unix:path={}", bus_socket.display()),
+            )
             .env_remove("DISPLAY")
             .stdout(log_file(&dir, "rose.log"))
             .stderr(log_file(&dir, "rose.log"))
@@ -107,6 +142,7 @@ impl Session {
         let session = Self {
             dir,
             sway,
+            bus,
             rose,
             rose_socket,
             config_path,
@@ -123,6 +159,11 @@ impl Session {
         let client = Client::spawn(&self.rose_socket, app_id, color);
         self.wait_pixel(visible_at.0, visible_at.1, color);
         client
+    }
+
+    /// The address of the session bus Rose is on.
+    pub fn bus_address(&self) -> String {
+        format!("unix:path={}", self.dir.join("bus").display())
     }
 
     pub fn screenshot(&self) -> Screenshot {
@@ -185,6 +226,8 @@ impl Drop for Session {
         let _ = self.rose.wait();
         let _ = self.sway.kill();
         let _ = self.sway.wait();
+        let _ = self.bus.kill();
+        let _ = self.bus.wait();
         if std::thread::panicking() {
             eprintln!("keeping {} for debugging", self.dir.display());
         } else {

@@ -4,7 +4,8 @@ A Wayland compositor built on [Smithay](https://github.com/Smithay/smithay) 0.7,
 management modeled on [hikari](https://hikari.acmelabs.space/): sheets, groups, marks,
 keyboard-driven modes and on-demand tiling layouts.
 
-Rose runs nested in a window inside your existing Wayland or X11 session (the winit backend).
+Rose runs either as your login session, directly on the hardware, or nested in a window inside an
+existing Wayland or X11 session.
 
 ## Running
 
@@ -16,6 +17,10 @@ nix run . -- --config ./my-config.toml   # use a specific config file
 
 Other clients can connect using the socket rose logs on startup (`WAYLAND_DISPLAY=wayland-1 some-app`).
 Set `RUST_LOG=debug` for more logging.
+
+Rose nests when `WAYLAND_DISPLAY` or `DISPLAY` is set and otherwise takes over the screen, using
+logind or seatd for access to it. `--nested` and `--tty` override that. To run it without a display
+manager, log in on a VT and run `rose`. Ctrl+Alt+F1 to F12 switch VTs.
 
 ## Configuration
 
@@ -31,6 +36,13 @@ GIF, PNG or WebP:
 path = "~/Pictures/wallpaper.gif"
 mode = "fill"  # or "fit", "stretch", "center"
 ```
+
+Rose is also a backend for the [wallpaper portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Wallpaper.html),
+so applications can offer "Set as wallpaper". When an application asks for a preview, Rose asks you
+in the menu first. The image is copied to `$XDG_STATE_HOME/rose` and survives restarts, until you
+change `path` in the config.
+
+The portal needs setting up outside Rose; see [Portal routing](#portal-routing).
 
 The default bindings use **Alt** instead of hikari's logo key, because desktops like GNOME reserve
 most logo-key shortcuts while Rose runs nested inside them. Some highlights:
@@ -50,6 +62,174 @@ most logo-key shortcuts while Rose runs nested inside them. Some highlights:
 | Alt+D / Alt+; | open the application / action menu |
 | Alt+drag / Alt+right-drag | move / resize |
 | Alt+Shift+Q / Alt+Ctrl+Q | close the view / quit |
+
+## NixOS and Home Manager
+
+The flake provides two modules:
+
+- `nixosModules.default` installs Rose system-wide and adds it to the display manager's session list.
+- `homeManagerModules.default` installs Rose for one user and writes their `config.toml`.
+
+You can use either or both. A typical setup uses the NixOS module for the login session and Home
+Manager for the configuration:
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    rose = {
+      url = "github:SomeGuyNamedMay/rose"; # or "path:/home/you/rose" for a local checkout
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs =
+    { nixpkgs, home-manager, rose, ... }:
+    {
+      nixosConfigurations.my-machine = nixpkgs.lib.nixosSystem {
+        modules = [
+          ./configuration.nix
+
+          rose.nixosModules.default
+          { programs.rose.enable = true; }
+
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.users.you = {
+              imports = [ rose.homeManagerModules.default ];
+              programs.rose = {
+                enable = true;
+                settings.ui.gap = 8;
+              };
+              home.stateVersion = "25.05";
+            };
+          }
+        ];
+      };
+    };
+}
+```
+
+Keep `inputs.nixpkgs.follows`: Rose loads the system's graphics drivers, and on the hardware they
+need to come from the same nixpkgs as Rose.
+
+### NixOS module
+
+Import `rose.nixosModules.default`, then:
+
+```nix
+{
+  programs.rose.enable = true;
+}
+```
+
+After `nixos-rebuild switch`, pick **Rose** in your display manager's session menu. Your display
+manager still has to be enabled separately, for example with `services.displayManager.gdm.enable`.
+To log in to Rose by default, also set `services.displayManager.defaultSession = "rose";`.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `programs.rose.enable` | `false` | Install Rose. |
+| `programs.rose.package` | this flake's package | The package to use. |
+| `programs.rose.session.enable` | `true` | List Rose in display managers, and enable what a desktop session needs: graphics drivers, polkit, default fonts and audio. |
+| `programs.rose.portal.enable` | `true` | Register the wallpaper portal backend, turning on `xdg.portal`. |
+
+To only run Rose nested, set `programs.rose.session.enable = false;`.
+
+### Home Manager module
+
+With Home Manager running standalone, add the module to your configuration:
+
+```nix
+homeConfigurations.you = home-manager.lib.homeManagerConfiguration {
+  pkgs = nixpkgs.legacyPackages.x86_64-linux;
+  modules = [
+    rose.homeManagerModules.default
+    ./home.nix
+  ];
+};
+```
+
+Then configure it, here or in the NixOS example above:
+
+```nix
+{
+  programs.rose = {
+    enable = true;
+    settings = {
+      ui.gap = 8;
+      ui.wallpaper.path = "~/Pictures/wallpaper.png";
+      bar.font-size = 16;
+      bindings.keyboard."AS+Return" = "action-terminal";
+    };
+  };
+}
+```
+
+`settings` takes the same keys as [`config.toml`](config.toml), which documents all of them. Key
+bindings are written `"<modifiers>+<keysym>"`, with `A` for Alt, `S` for Shift, `C` for Control and
+`L` for the logo key.
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `programs.rose.enable` | `false` | Install Rose. |
+| `programs.rose.package` | this flake's package | The package to use. |
+| `programs.rose.settings` | `{ }` | The contents of `config.toml`. |
+| `programs.rose.mergeDefaults` | `true` | Merge `settings` over the built-in config. |
+| `programs.rose.session.enable` | `true` | Add the `rose-session` systemd target. |
+| `programs.rose.portal.enable` | `false` | Register the portal backend through Home Manager's `xdg.portal`. |
+
+A config file normally replaces the built-in config, including every key binding, so
+`mergeDefaults` keeps the defaults for anything `settings` doesn't mention. To remove a default
+binding, turn it off and write the whole config in `settings`. With `settings` empty and
+`mergeDefaults` on, no file is written, which leaves `~/.config/rose/config.toml` yours to manage.
+
+The options aren't validated at build time. If `settings` has a mistake, Rose logs an error and
+starts with its built-in config, so check its log if your changes seem to be ignored. On a login
+session, find it with `journalctl -b | grep rose`.
+
+Home Manager can't add Rose to a display manager's session list, because that's system
+configuration. Without the NixOS module, start `rose` from a VT. When Rose runs on the hardware it
+starts `rose-session.target`, which also starts `graphical-session.target`, so user services that
+are tied to the graphical session run with it.
+
+The generated config is read-only, and the `reload` action picks up changes after
+`home-manager switch`. A wallpaper set through the portal is kept in `~/.local/state/rose`, and stays
+until `ui.wallpaper.path` in the config changes.
+
+Enable the portal in only one of the two modules. On NixOS that's the NixOS module, which is on by
+default. Home Manager's `portal.enable` is for other distributions.
+
+### Portal routing
+
+`xdg-desktop-portal` picks backends by `XDG_CURRENT_DESKTOP`. The package installs `rose.portal` and
+`rose-portals.conf`, which send wallpaper requests to Rose when that variable is `rose`, as it is
+in Rose's login session.
+
+Nested in another desktop, that desktop's portal config decides, so nothing reaches Rose until you
+route it there. On GNOME with NixOS:
+
+```nix
+{
+  xdg.portal.config.gnome = {
+    default = [ "gnome" "gtk" ];
+    "org.freedesktop.impl.portal.Access" = [ "gtk" ];
+    "org.freedesktop.impl.portal.Notification" = [ "gtk" ];
+    "org.freedesktop.impl.portal.Secret" = [ "gnome-keyring" ];
+    "org.freedesktop.impl.portal.Wallpaper" = [ "rose" ];
+  };
+}
+```
+
+Without NixOS, put the same settings in `~/.config/xdg-desktop-portal/gnome-portals.conf`. This
+replaces GNOME's own portal config, so it repeats GNOME's defaults. Log out and back in afterwards.
+With this routing, every application's wallpaper request in that desktop goes to Rose, and fails
+while Rose isn't running.
 
 ## Window management
 
@@ -119,7 +299,7 @@ closed. Its keys follow ranger's:
 ## Differences from hikari
 
 - Instead of indicator bars on each view, one bar shows the focused view and what modes have typed.
-- Single output, nested only; no DRM/libinput backend, layer-shell or screen locking.
+- A single output on a single GPU, with no multi-monitor support. No layer-shell or screen locking.
 - X11 apps run through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite) when
   it is installed, started on the first X11 connection as niri does, rather than built-in XWayland.
   Their app id is their WM_CLASS, e.g. `XTerm`.
@@ -141,13 +321,14 @@ cargo test     # unit tests
 mouse input through sway's virtual input protocols, opens test windows that fill themselves with a
 solid color, and checks pixels in screenshots taken with `grim`. They cover tiling, cycling,
 maximizing, sheets, marks, groups, modes, mouse and keyboard move/resize, client-requested
-move/resize, snapping, input grabs, reload, quit, the bar and menu, and wallpapers.
+move/resize, snapping, input grabs, reload, quit, the bar and menu, wallpapers and the wallpaper portal.
 
 They need sway and grim, so plain `cargo test` skips them. Run them with:
 
 ```sh
 nix develop -c cargo test --test e2e -- --ignored   # uses your GPU, ~15s
-nix flake check                                     # in the Nix sandbox with software rendering
+nix flake check                                     # in the Nix sandbox with software rendering,
+                                                    # plus a VM that logs in through GDM (needs KVM)
 ```
 
 When a test fails it names the pixel that was wrong and keeps a directory with the screenshot

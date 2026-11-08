@@ -10,9 +10,12 @@ use smithay::{
     backend::{
         allocator::Fourcc,
         renderer::{
-            element::memory::MemoryRenderBufferRenderElement,
-            element::{memory::MemoryRenderBuffer, Kind},
-            gles::GlesRenderer,
+            element::{
+                texture::{TextureRenderBuffer, TextureRenderElement},
+                Kind,
+            },
+            gles::{GlesError, GlesFrame, GlesRenderer, GlesTexture},
+            Bind, Frame, Offscreen, Renderer,
         },
     },
     desktop::Window,
@@ -24,7 +27,7 @@ use crate::{
     config::{BarConfig, BarPosition, Color, Theme},
     menu::Menu,
     render::RoseRenderElement,
-    text::{Canvas, Font},
+    text::{self, Canvas, Font},
     wm::{self, Mode},
     Rose,
 };
@@ -51,56 +54,95 @@ struct Content {
     status: String,
 }
 
-/// A memory buffer and the size it was created with.
+/// A texture and the size it was created with.
 #[derive(Default)]
 struct Surface {
-    buffer: Option<MemoryRenderBuffer>,
+    buffer: Option<TextureRenderBuffer<GlesTexture>>,
     size: (i32, i32),
 }
 
 impl Surface {
-    /// Paints with `paint` into a buffer of `size`, recreating the buffer if the size changed.
-    fn paint(&mut self, size: (i32, i32), paint: impl FnOnce(&mut Canvas)) {
+    /// Draws with `draw` into a texture of `size`, recreating the texture if the size changed.
+    fn paint(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        size: (i32, i32),
+        draw: impl FnOnce(&mut GlesFrame<'_, '_>) -> Result<(), GlesError>,
+    ) {
         let full = Rectangle::from_size(size.into());
-        if self.size != size || self.buffer.is_none() {
-            self.buffer = Some(MemoryRenderBuffer::new(
-                Fourcc::Argb8888,
-                size,
-                1,
-                Transform::Normal,
-                Some(vec![full]),
-            ));
-            self.size = size;
+        let result = (|| {
+            if self.size != size || self.buffer.is_none() {
+                let texture = renderer.create_buffer(Fourcc::Abgr8888, size.into())?;
+                // egui draws for OpenGL's bottom-left origin.
+                self.buffer = Some(TextureRenderBuffer::from_texture(
+                    renderer,
+                    texture,
+                    1,
+                    Transform::Flipped180,
+                    Some(vec![full]),
+                ));
+                self.size = size;
+            }
+            self.buffer.as_mut().unwrap().render().draw(|texture| {
+                let mut texture = texture.clone();
+                let mut target = renderer.bind(&mut texture)?;
+                let mut frame = renderer.render(&mut target, size.into(), Transform::Normal)?;
+                draw(&mut frame)?;
+                // The texture is used from this same OpenGL context, which keeps the order.
+                let _ = frame.finish()?;
+                Ok::<_, GlesError>(vec![full])
+            })
+        })();
+        if let Err(err) = result {
+            tracing::warn!("failed to draw the bar: {err:?}");
         }
-        let mut context = self.buffer.as_mut().unwrap().render();
-        let _ = context.draw(|data| {
-            paint(&mut Canvas {
-                data,
-                width: size.0,
-                height: size.1,
-            });
-            Ok::<_, ()>(vec![full])
-        });
     }
 
-    fn element(
-        &self,
+    /// Runs `paint` through egui and draws the result into the texture.
+    fn paint_egui(
+        &mut self,
         renderer: &mut GlesRenderer,
-        location: Point<i32, Logical>,
-    ) -> Option<RoseRenderElement> {
+        painter: &mut Option<Option<egui_glow::Painter>>,
+        font: &mut Font,
+        size: (i32, i32),
+        paint: impl FnOnce(&mut Canvas, &mut Font),
+    ) {
+        let painter = painter.get_or_insert_with(|| {
+            text::gl_painter(renderer)
+                .map_err(|err| tracing::error!("can't draw the bar with egui: {err}"))
+                .ok()
+        });
+        let Some(painter) = painter else {
+            return;
+        };
+        let mut drawn = font.draw(size, paint);
+        self.paint(renderer, size, |frame| {
+            frame.with_context(|_| {
+                painter.paint_and_update_textures(
+                    [size.0 as u32, size.1 as u32],
+                    1.0,
+                    &drawn.primitives,
+                    &mut drawn.textures,
+                )
+            })
+        });
+        // Only non-empty if drawing failed, and egui asserts that updates aren't dropped.
+        drawn.textures.clear();
+    }
+
+    fn element(&self, location: Point<i32, Logical>) -> Option<RoseRenderElement> {
         let buffer = self.buffer.as_ref()?;
-        MemoryRenderBufferRenderElement::from_buffer(
-            renderer,
-            location.to_f64().to_physical(1.0),
-            buffer,
-            None,
-            None,
-            None,
-            Kind::Unspecified,
+        Some(
+            TextureRenderElement::from_texture_render_buffer(
+                location.to_f64().to_physical(1.0),
+                buffer,
+                None,
+                None,
+                None,
+                Kind::Unspecified,
+            )
+            .into(),
         )
-        .map_err(|err| tracing::warn!("failed to upload the bar: {err:?}"))
-        .ok()
-        .map(RoseRenderElement::from)
     }
 }
 
@@ -111,6 +153,8 @@ pub struct Bar {
     drawn: Option<Content>,
     targets: Vec<(i32, i32, Target)>,
     menu_surface: Surface,
+    /// Created on first use, as it needs the renderer; the inner `None` means that failed.
+    painter: Option<Option<egui_glow::Painter>>,
     /// The last line the status command printed.
     status: String,
     status_command: Option<String>,
@@ -129,6 +173,7 @@ impl Bar {
             drawn: None,
             targets: Vec::new(),
             menu_surface: Surface::default(),
+            painter: None,
             status: String::new(),
             status_command: None,
             status_child: None,
@@ -208,25 +253,32 @@ impl Bar {
         }
     }
 
-    fn paint(&mut self, content: &Content) {
+    fn paint(&mut self, renderer: &mut GlesRenderer, content: &Content) {
         self.targets.clear();
         let Some(font) = &mut self.font else {
-            let theme = content.theme;
-            self.surface.paint(content.size, |canvas| {
-                canvas.fill((0, 0, canvas.width, canvas.height), theme.background)
+            let color = content.theme.background.0;
+            let full = Rectangle::from_size(content.size.into());
+            self.surface.paint(renderer, content.size, |frame| {
+                frame.clear(color.into(), &[full])
             });
             return;
         };
         let targets = &mut self.targets;
-        self.surface.paint(content.size, |canvas| {
-            paint_bar(canvas, font, content, targets);
-        });
+        self.surface.paint_egui(
+            renderer,
+            &mut self.painter,
+            font,
+            content.size,
+            |canvas, font| paint_bar(canvas, font, content, targets),
+        );
     }
 }
 
 impl Drop for Bar {
     fn drop(&mut self) {
         self.stop_status();
+        // The OpenGL context may already be gone, and the process is exiting anyway.
+        std::mem::forget(self.painter.take());
     }
 }
 
@@ -459,21 +511,25 @@ impl Rose {
             if menu.dirty || self.bar.menu_surface.size != size {
                 let theme = self.config.bar.colors;
                 if let Some(font) = &mut self.bar.font {
-                    self.bar
-                        .menu_surface
-                        .paint(size, |canvas| menu.paint(canvas, font, &theme, row));
+                    self.bar.menu_surface.paint_egui(
+                        renderer,
+                        &mut self.bar.painter,
+                        font,
+                        size,
+                        |canvas, font| menu.paint(canvas, font, &theme, row),
+                    );
                 }
             }
-            elements.extend(self.bar.menu_surface.element(renderer, rect.loc));
+            elements.extend(self.bar.menu_surface.element(rect.loc));
         }
 
         if let Some(rect) = self.bar_rect() {
             let content = self.bar_content((rect.size.w, rect.size.h));
             if self.bar.drawn.as_ref() != Some(&content) {
-                self.bar.paint(&content);
+                self.bar.paint(renderer, &content);
                 self.bar.drawn = Some(content);
             }
-            elements.extend(self.bar.surface.element(renderer, rect.loc));
+            elements.extend(self.bar.surface.element(rect.loc));
         }
 
         elements

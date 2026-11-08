@@ -71,6 +71,8 @@ pub enum MenuSource {
     Actions,
     /// Layout registers, to apply one.
     Layouts,
+    /// The choice of whether to accept a wallpaper from an application.
+    Wallpaper,
     /// A ranger-like file manager.
     Files,
 }

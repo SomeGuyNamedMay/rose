@@ -1,13 +1,16 @@
 use smithay::{
     backend::input::{
         AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
     },
     input::{
-        keyboard::{Keysym, KeysymHandle, ModifiersState},
+        keyboard::{
+            keysyms::{KEY_XF86Switch_VT_1, KEY_XF86Switch_VT_12},
+            Keysym, KeysymHandle, ModifiersState,
+        },
         pointer::{AxisFrame, ButtonEvent, GrabStartData, MotionEvent},
     },
-    utils::{Serial, SERIAL_COUNTER},
+    utils::{Logical, Point, Serial, SERIAL_COUNTER},
 };
 
 use crate::{
@@ -26,6 +29,7 @@ enum KeyCommand {
     ExitInputGrab,
     /// A key was released while moving or resizing with the keyboard.
     EndGrab,
+    SwitchVt(i32),
 }
 
 impl Rose {
@@ -49,25 +53,15 @@ impl Rose {
                     self.run_key_command(command, serial, time);
                 }
             }
-            InputEvent::PointerMotionAbsolute { event, .. } => {
-                let output = self.space.outputs().next().unwrap();
-                let output_geo = self.space.output_geometry(output).unwrap();
-                let pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
-
-                let serial = SERIAL_COUNTER.next_serial();
+            InputEvent::PointerMotion { event, .. } => {
                 let pointer = self.seat.get_pointer().unwrap();
-                let under = self.surface_under(pos);
-
-                pointer.motion(
-                    self,
-                    under,
-                    &MotionEvent {
-                        location: pos,
-                        serial,
-                        time: event.time_msec(),
-                    },
-                );
-                pointer.frame(self);
+                let pos = pointer.current_location() + event.delta();
+                self.move_pointer(self.clamp_to_output(pos), event.time_msec());
+            }
+            InputEvent::PointerMotionAbsolute { event, .. } => {
+                let output_geo = self.output_rect();
+                let pos = event.position_transformed(output_geo.size) + output_geo.loc.to_f64();
+                self.move_pointer(pos, event.time_msec());
             }
             InputEvent::PointerButton { event, .. } => {
                 let serial = SERIAL_COUNTER.next_serial();
@@ -136,6 +130,40 @@ impl Rose {
         }
     }
 
+    fn move_pointer(&mut self, location: Point<f64, Logical>, time: u32) {
+        let serial = SERIAL_COUNTER.next_serial();
+        let pointer = self.seat.get_pointer().unwrap();
+        let under = self.surface_under(location);
+        pointer.motion(
+            self,
+            under,
+            &MotionEvent {
+                location,
+                serial,
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
+    fn clamp_to_output(&self, pos: Point<f64, Logical>) -> Point<f64, Logical> {
+        let output = self.output_rect();
+        let (x, y) = (output.loc.x as f64, output.loc.y as f64);
+        let max = |size: i32| (size - 1).max(0) as f64;
+        (
+            pos.x.clamp(x, x + max(output.size.w)),
+            pos.y.clamp(y, y + max(output.size.h)),
+        )
+            .into()
+    }
+
+    /// Puts the pointer in the middle of the screen.
+    pub fn center_pointer(&mut self) {
+        let output = self.output_rect();
+        let center = output.loc.to_f64() + output.size.to_f64().downscale(2.0).to_point();
+        self.move_pointer(center, 0);
+    }
+
     /// Decides whether a key goes to the client, and what the compositor does with it.
     fn filter_key(
         &mut self,
@@ -153,6 +181,14 @@ impl Rose {
         // Clients always see modifiers, so they stay in sync.
         if handle.modified_sym().is_modifier_key() {
             return (true, None);
+        }
+
+        // Works in every mode, so a VT is always within reach.
+        let sym = handle.modified_sym().raw();
+        if self.tty.is_some() && (KEY_XF86Switch_VT_1..=KEY_XF86Switch_VT_12).contains(&sym) {
+            self.suppressed_keys.insert(code);
+            let vt = (sym - KEY_XF86Switch_VT_1 + 1) as i32;
+            return (false, Some(KeyCommand::SwitchVt(vt)));
         }
 
         let command = match &self.mode {
@@ -180,6 +216,11 @@ impl Rose {
             KeyCommand::ModeKey(sym) => self.handle_mode_key(sym),
             KeyCommand::MenuKey(sym, mods) => self.handle_menu_key(sym, &mods),
             KeyCommand::ExitInputGrab => self.mode = Mode::Normal,
+            KeyCommand::SwitchVt(vt) => {
+                if let Some(tty) = &mut self.tty {
+                    tty.switch_vt(vt);
+                }
+            }
             KeyCommand::EndGrab => {
                 let pointer = self.seat.get_pointer().unwrap();
                 pointer.unset_grab(self, serial, time);

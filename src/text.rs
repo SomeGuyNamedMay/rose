@@ -1,18 +1,42 @@
-//! Software text and shape drawing for the bar and menu, into ARGB8888 memory buffers.
+//! Text and shape drawing for the bar and menu, with egui.
 
-use std::collections::HashMap;
+use std::sync::Arc;
 
-use fontdue::{Font as FontData, FontSettings, Metrics};
+use egui::{
+    epaint::{text::FontData, textures::TexturesDelta, ClippedPrimitive, Stroke},
+    pos2,
+    text::LayoutJob,
+    vec2, Color32, Context, FontDefinitions, FontFamily, FontId, LayerId, Painter, Pos2, RawInput,
+    Rect as EguiRect, Shape, TextFormat,
+};
+use egui_glow::glow;
+use smithay::backend::{egl, renderer::gles::GlesRenderer};
 
 use crate::config::Color;
 
+/// A font, and the egui context it is laid out and drawn with.
 pub struct Font {
-    font: FontData,
-    size: f32,
-    glyphs: HashMap<char, (Metrics, Vec<u8>)>,
-    /// Pixels from the top of a line to the baseline.
-    pub ascent: i32,
+    context: Context,
+    id: FontId,
+    /// Font atlas updates that the GL painter hasn't received yet.
+    textures: TexturesDelta,
     pub line_height: i32,
+}
+
+/// One pass of egui, ready to be drawn with OpenGL.
+pub struct Drawn {
+    pub primitives: Vec<ClippedPrimitive>,
+    pub textures: TexturesDelta,
+}
+
+fn raw_input((width, height): (i32, i32)) -> RawInput {
+    RawInput {
+        screen_rect: Some(EguiRect::from_min_size(
+            Pos2::ZERO,
+            vec2(width as f32, height as f32),
+        )),
+        ..RawInput::default()
+    }
 }
 
 impl Font {
@@ -21,45 +45,44 @@ impl Font {
     pub fn load(family: &str, size: f32) -> Result<Self, String> {
         let (data, index) = if family.contains('/') {
             let data = std::fs::read(family).map_err(|e| format!("{family}: {e}"))?;
+            let mut db = fontdb::Database::new();
+            db.load_font_data(data.clone());
+            if db.is_empty() {
+                return Err(format!("{family}: not a font file"));
+            }
             (data, 0)
         } else {
             find_font(family).ok_or("no fonts found")?
         };
-        let font = FontData::from_bytes(
-            data,
-            FontSettings {
-                collection_index: index,
-                scale: size,
-                ..FontSettings::default()
-            },
-        )
-        .map_err(|e| format!("{family}: {e}"))?;
 
-        let (ascent, descent) = font
-            .horizontal_line_metrics(size)
-            .map_or((size * 0.8, -size * 0.2), |m| (m.ascent, m.descent));
+        let mut definitions = FontDefinitions::empty();
+        let mut font = FontData::from_owned(data);
+        font.index = index;
+        definitions.font_data.insert("rose".into(), Arc::new(font));
+        for family in [FontFamily::Monospace, FontFamily::Proportional] {
+            definitions.families.insert(family, vec!["rose".into()]);
+        }
+        let context = Context::default();
+        context.set_fonts(definitions);
+
+        // egui only has fonts once a pass has begun.
+        let id = FontId::monospace(size);
+        context.begin_pass(raw_input((1, 1)));
+        let line_height = context.fonts_mut(|f| f.row_height(&id)).ceil() as i32;
+        let textures = context.end_pass().textures_delta;
         Ok(Self {
-            font,
-            size,
-            glyphs: HashMap::new(),
-            ascent: ascent.round() as i32,
-            line_height: (ascent - descent).ceil() as i32,
+            context,
+            id,
+            textures,
+            line_height,
         })
     }
 
-    fn glyph(&mut self, c: char) -> &(Metrics, Vec<u8>) {
-        let (font, size) = (&self.font, self.size);
-        self.glyphs
-            .entry(c)
-            .or_insert_with(|| font.rasterize(c, size))
-    }
-
-    fn advance(&mut self, c: char) -> f32 {
-        self.glyph(c).0.advance_width
-    }
-
     pub fn width(&mut self, text: &str) -> i32 {
-        text.chars().map(|c| self.advance(c)).sum::<f32>().ceil() as i32
+        let id = &self.id;
+        self.context
+            .fonts_mut(|f| text.chars().map(|c| f.glyph_width(id, c)).sum::<f32>())
+            .ceil() as i32
     }
 
     /// The longest prefix of `text` that fits in `max` pixels, ending in `…` if it was cut.
@@ -67,19 +90,62 @@ impl Font {
         if self.width(text) <= max {
             return text.to_string();
         }
-        let budget = max as f32 - self.advance('…');
-        let mut width = 0.0;
-        let mut out = String::new();
-        for c in text.chars() {
-            width += self.advance(c);
-            if width > budget {
-                break;
+        let id = &self.id;
+        self.context.fonts_mut(|f| {
+            let budget = max as f32 - f.glyph_width(id, '…');
+            let mut width = 0.0;
+            let mut out = String::new();
+            for c in text.chars() {
+                width += f.glyph_width(id, c);
+                if width > budget {
+                    break;
+                }
+                out.push(c);
             }
-            out.push(c);
-        }
-        out.push('…');
-        out
+            out.push('…');
+            out
+        })
     }
+
+    /// Runs a pass of egui over a surface of `size`, with `paint` doing the drawing.
+    pub fn draw(&mut self, size: (i32, i32), paint: impl FnOnce(&mut Canvas, &mut Font)) -> Drawn {
+        self.context.begin_pass(raw_input(size));
+        let mut canvas = Canvas {
+            painter: self.context.layer_painter(LayerId::background()),
+            width: size.0,
+            height: size.1,
+        };
+        paint(&mut canvas, self);
+        let output = self.context.end_pass();
+
+        let mut textures = std::mem::take(&mut self.textures);
+        textures.append(output.textures_delta);
+        Drawn {
+            primitives: self
+                .context
+                .tessellate(output.shapes, output.pixels_per_point),
+            textures,
+        }
+    }
+}
+
+impl Drop for Font {
+    fn drop(&mut self) {
+        // egui asserts that updates are applied, but these have nowhere to go.
+        self.textures.clear();
+    }
+}
+
+/// Creates the painter that draws egui's output, on the renderer's OpenGL context.
+pub fn gl_painter(renderer: &mut GlesRenderer) -> Result<egui_glow::Painter, String> {
+    renderer
+        .with_context(|_| {
+            // Safety: the renderer's context is current, and outlives the painter.
+            let gl =
+                unsafe { glow::Context::from_loader_function(|name| egl::get_proc_address(name)) };
+            egui_glow::Painter::new(Arc::new(gl), "", None, false).map_err(|e| e.to_string())
+        })
+        .map_err(|e| e.to_string())?
 }
 
 fn find_font(family: &str) -> Option<(Vec<u8>, u32)> {
@@ -114,40 +180,28 @@ fn find_font(family: &str) -> Option<(Vec<u8>, u32)> {
 /// A pixel rectangle: x, y, width and height.
 pub type Rect = (i32, i32, i32, i32);
 
-/// Draws into an ARGB8888 buffer.
-pub struct Canvas<'a> {
-    pub data: &'a mut [u8],
+/// Draws into a pass of egui.
+pub struct Canvas {
+    painter: Painter,
     pub width: i32,
     pub height: i32,
 }
 
-fn rgb(color: Color) -> [f32; 3] {
-    [color.0[0], color.0[1], color.0[2]]
+fn color32(color: Color) -> Color32 {
+    let channel = |c: f32| (c * 255.0).round() as u8;
+    Color32::from_rgb(
+        channel(color.0[0]),
+        channel(color.0[1]),
+        channel(color.0[2]),
+    )
 }
 
-impl Canvas<'_> {
-    /// Blends `color` into a pixel with coverage `alpha`.
-    fn blend(&mut self, x: i32, y: i32, color: [f32; 3], alpha: f32) {
-        if x < 0 || y < 0 || x >= self.width || y >= self.height || alpha <= 0.0 {
-            return;
-        }
-        let i = ((y * self.width + x) * 4) as usize;
-        let px = &mut self.data[i..i + 4];
-        // Bytes are B, G, R, A.
-        for (byte, channel) in [(2, 0), (1, 1), (0, 2)] {
-            let old = px[byte] as f32 / 255.0;
-            let new = old + (color[channel] - old) * alpha.min(1.0);
-            px[byte] = (new * 255.0).round() as u8;
-        }
-        px[3] = 0xFF;
-    }
-
+impl Canvas {
     pub fn fill(&mut self, (x, y, w, h): Rect, color: Color) {
-        let color = rgb(color);
-        for row in y.max(0)..(y + h).min(self.height) {
-            for col in x.max(0)..(x + w).min(self.width) {
-                self.blend(col, row, color, 1.0);
-            }
+        if w > 0 && h > 0 {
+            let min = pos2(x as f32, y as f32);
+            let rect = EguiRect::from_min_size(min, vec2(w as f32, h as f32));
+            self.painter.rect_filled(rect, 0.0, color32(color));
         }
     }
 
@@ -160,18 +214,15 @@ impl Canvas<'_> {
         (y, h): (i32, i32),
         color: Color,
     ) {
-        let color = rgb(color);
-        for row in 0..h {
-            // How far up the row's center is, from 0 at the bottom to 1 at the top.
-            let t = 1.0 - (row as f32 + 0.5) / h as f32;
-            let l = left as f32 + left_slant as f32 * t;
-            let r = right as f32 + right_slant as f32 * t;
-            for col in l.floor() as i32..r.ceil() as i32 {
-                let (c0, c1) = (col as f32, col as f32 + 1.0);
-                let coverage = (c1.min(r) - c0.max(l)).clamp(0.0, 1.0);
-                self.blend(col, y + row, color, coverage);
-            }
-        }
+        let (top, bottom) = (y as f32, (y + h) as f32);
+        let points = vec![
+            pos2((left + left_slant) as f32, top),
+            pos2((right + right_slant) as f32, top),
+            pos2(right as f32, bottom),
+            pos2(left as f32, bottom),
+        ];
+        self.painter
+            .add(Shape::convex_polygon(points, color32(color), Stroke::NONE));
     }
 
     /// Draws `text` with its line's top at `y`, returning the x where it ends.
@@ -188,24 +239,31 @@ impl Canvas<'_> {
         text: &str,
         color: impl Fn(usize) -> Color,
     ) -> i32 {
-        let baseline = y + font.ascent;
-        let mut pen = x as f32;
+        let mut job = LayoutJob {
+            break_on_newline: false,
+            ..LayoutJob::default()
+        };
+        let format = |color| TextFormat::simple(font.id.clone(), color);
+        let mut run = String::new();
+        let mut run_color = None;
         for (i, c) in text.chars().enumerate() {
-            let rgb = rgb(color(i));
-            let (metrics, bitmap) = font.glyph(c);
-            let gx = pen.round() as i32 + metrics.xmin;
-            let gy = baseline - metrics.height as i32 - metrics.ymin;
-            let (gw, advance) = (metrics.width, metrics.advance_width);
-            for (j, coverage) in bitmap.iter().enumerate() {
-                if *coverage > 0 {
-                    let (col, row) = ((j % gw) as i32, (j / gw) as i32);
-                    // A little gamma keeps light text on dark backgrounds from looking thin.
-                    let alpha = (*coverage as f32 / 255.0).powf(0.8);
-                    self.blend(gx + col, gy + row, rgb, alpha);
-                }
+            let color = color32(color(i));
+            if run_color.is_some_and(|last| last != color) {
+                job.append(&run, 0.0, format(run_color.unwrap()));
+                run.clear();
             }
-            pen += advance;
+            run_color = Some(color);
+            run.push(c);
         }
-        pen.ceil() as i32
+        let Some(last) = run_color else {
+            return x;
+        };
+        job.append(&run, 0.0, format(last));
+
+        let galley = font.context.fonts_mut(|f| f.layout_job(job));
+        let end = x as f32 + galley.size().x;
+        self.painter
+            .galley(pos2(x as f32, y as f32), galley, Color32::WHITE);
+        end.ceil() as i32
     }
 }

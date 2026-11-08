@@ -23,6 +23,7 @@ use smithay::{
     utils::{Logical, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        dmabuf::{DmabufGlobal, DmabufState},
         output::OutputManagerState,
         selection::data_device::DataDeviceState,
         shell::xdg::{decoration::XdgDecorationState, XdgShellState},
@@ -35,7 +36,9 @@ use smithay::{
 use crate::{
     bar::Bar,
     config::Config,
+    cursor::Cursors,
     menu::Menu,
+    tty::Tty,
     wallpaper::Wallpaper,
     wm::{Mode as WmMode, SheetLayout, View},
     xwayland::Xwayland,
@@ -85,6 +88,13 @@ pub struct Rose {
     pub seat_state: SeatState<Rose>,
     pub data_device_state: DataDeviceState,
     pub viewporter_state: ViewporterState,
+    pub dmabuf_state: DmabufState,
+    pub dmabuf_global: Option<DmabufGlobal>,
+
+    /// Present when running on the hardware rather than nested.
+    pub tty: Option<Tty>,
+    /// Present when Rose draws named cursors itself.
+    pub cursors: Option<Cursors>,
 
     pub seat: Seat<Self>,
 }
@@ -155,6 +165,18 @@ impl Rose {
             })
             .expect("failed to insert the wallpaper channel");
 
+        // Wallpapers from applications, through the portal.
+        let (portal_sender, portal_channel) = channel::channel();
+        event_loop
+            .handle()
+            .insert_source(portal_channel, |event, _, state: &mut Self| {
+                if let ChannelEvent::Msg(request) = event {
+                    state.handle_portal_request(request);
+                }
+            })
+            .expect("failed to insert the portal channel");
+        crate::portal::spawn(portal_sender);
+
         let mut state = Self {
             start_time: std::time::Instant::now(),
             socket_name,
@@ -193,6 +215,11 @@ impl Rose {
             seat_state,
             data_device_state,
             viewporter_state,
+            dmabuf_state: DmabufState::new(),
+            dmabuf_global: None,
+
+            tty: None,
+            cursors: None,
 
             seat,
         };

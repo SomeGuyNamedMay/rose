@@ -6,6 +6,7 @@ use std::{
     collections::{BTreeSet, HashSet},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use smithay::{
@@ -17,6 +18,7 @@ use crate::{
     action::{self, Action, MenuSource},
     config::Theme,
     files::Files,
+    portal,
     text::{Canvas, Font},
     wm::{self, Mode},
     Rose,
@@ -29,6 +31,8 @@ pub enum Target {
     Command(String),
     View(Window),
     Action(Action),
+    /// Accepts a wallpaper from an application, or leaves the current one for `None`.
+    Wallpaper(Option<Arc<portal::Request>>),
 }
 
 pub struct Item {
@@ -85,6 +89,11 @@ impl MenuSource {
                 &["Action", "Binding", "Command"],
             ),
             Self::Layouts => ("Apply layout", "Layouts", &["Register", "Layout"]),
+            Self::Wallpaper => (
+                "Set wallpaper",
+                "Requested by an application",
+                &["Choice", "File"],
+            ),
             // Painted by the file manager.
             Self::Files => ("Files", "Files", &[]),
         }
@@ -724,7 +733,8 @@ impl Rose {
                     })
                     .collect()
             }
-            MenuSource::Files => Vec::new(),
+            // Files has its own painting, and Wallpaper its own items.
+            MenuSource::Files | MenuSource::Wallpaper => Vec::new(),
         }
     }
 
@@ -784,6 +794,8 @@ impl Rose {
                 }
             }
             Target::Action(action) => self.run_action(action, None),
+            Target::Wallpaper(Some(request)) => self.accept_wallpaper(&request),
+            Target::Wallpaper(None) => {}
         }
     }
 }

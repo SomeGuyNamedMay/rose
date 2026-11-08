@@ -1,17 +1,22 @@
 //! Builds the frame: the menu and bar, views in stacking order with their borders, the client's
 //! cursor and the wallpaper.
 
+use std::time::Duration;
+
 use smithay::{
     backend::renderer::{
         element::{
             memory::MemoryRenderBufferRenderElement,
             solid::SolidColorRenderElement,
             surface::{render_elements_from_surface_tree, WaylandSurfaceRenderElement},
+            texture::TextureRenderElement,
             AsRenderElements, Kind,
         },
-        gles::GlesRenderer,
+        gles::{GlesRenderer, GlesTexture},
     },
+    desktop::utils::send_frames_surface_tree,
     input::pointer::{CursorImageStatus, CursorImageSurfaceData},
+    output::Output,
     utils::{Logical, Rectangle, Scale},
     wayland::compositor::with_states,
 };
@@ -23,6 +28,7 @@ smithay::backend::renderer::element::render_elements! {
     Surface=WaylandSurfaceRenderElement<GlesRenderer>,
     Solid=SolidColorRenderElement,
     Memory=MemoryRenderBufferRenderElement<GlesRenderer>,
+    Texture=TextureRenderElement<GlesTexture>,
 }
 
 impl Rose {
@@ -54,6 +60,11 @@ impl Rose {
                 1.0,
                 Kind::Cursor,
             ));
+        } else if let (CursorImageStatus::Named(icon), Some(cursors)) =
+            (&self.cursor_status, &mut self.cursors)
+        {
+            let location = self.seat.get_pointer().unwrap().current_location();
+            elements.extend(cursors.element(renderer, *icon, location.to_i32_round()));
         }
 
         elements.extend(self.panel_elements(renderer));
@@ -98,6 +109,27 @@ impl Rose {
 
         elements.extend(self.wallpaper_element(renderer));
         elements
+    }
+}
+
+impl Rose {
+    /// Lets clients draw their next frame, after one has been rendered.
+    pub fn frame_done(&mut self, output: &Output) {
+        let time = self.start_time.elapsed();
+        for window in self.space.elements() {
+            window.send_frame(output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+        }
+        if let CursorImageStatus::Surface(surface) = &self.cursor_status {
+            send_frames_surface_tree(surface, output, time, Some(Duration::ZERO), |_, _| {
+                Some(output.clone())
+            });
+        }
+
+        self.space.refresh();
+        self.popups.cleanup();
+        let _ = self.display_handle.flush_clients();
     }
 }
 

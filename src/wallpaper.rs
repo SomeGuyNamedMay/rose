@@ -28,7 +28,7 @@ use smithay::{
     utils::{Logical, Point, Rectangle, Size, Transform},
 };
 
-use crate::{config::WallpaperMode, render::RoseRenderElement, Rose};
+use crate::{config::WallpaperMode, portal, render::RoseRenderElement, Rose};
 
 /// Frames shorter than this are shown for `DEFAULT_DELAY` instead, like browsers do.
 const MIN_DELAY: Duration = Duration::from_millis(20);
@@ -285,9 +285,14 @@ fn animation<'a>(decoder: impl AnimationDecoder<'a>) -> Result<Vec<RawFrame>, Bo
 }
 
 impl Rose {
-    /// The configured wallpaper's path, with `~/` expanded and relative to the config file.
+    /// The wallpaper from the portal if there is one, or else the configured wallpaper's path,
+    /// with `~/` expanded and relative to the config file.
     pub fn wallpaper_path(&self) -> Option<PathBuf> {
-        let path = self.config.ui.wallpaper.path.as_ref()?;
+        let configured = self.config.ui.wallpaper.path.as_ref();
+        if let Some(image) = portal::current(configured.map(|p| p.as_path())) {
+            return Some(image);
+        }
+        let path = configured?;
         let path = match (path.strip_prefix("~"), std::env::var_os("HOME")) {
             (Ok(rest), Some(home)) => PathBuf::from(home).join(rest),
             _ => path.clone(),

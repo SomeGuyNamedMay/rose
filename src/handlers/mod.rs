@@ -2,10 +2,12 @@ mod compositor;
 mod xdg_shell;
 
 use smithay::{
-    delegate_data_device, delegate_output, delegate_seat,
-    input::{pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
+    backend::allocator::dmabuf::Dmabuf,
+    delegate_data_device, delegate_dmabuf, delegate_output, delegate_seat,
+    input::{keyboard::LedState, pointer::CursorImageStatus, Seat, SeatHandler, SeatState},
     reexports::wayland_server::{protocol::wl_surface::WlSurface, Resource},
     wayland::{
+        dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier},
         output::OutputHandler,
         selection::{
             data_device::{
@@ -34,6 +36,12 @@ impl SeatHandler for Rose {
         self.cursor_status = image;
     }
 
+    fn led_state_changed(&mut self, _seat: &Seat<Self>, leds: LedState) {
+        if let Some(tty) = &mut self.tty {
+            tty.update_leds(leds);
+        }
+    }
+
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         // Clipboard offers follow keyboard focus.
         let dh = &self.display_handle;
@@ -60,6 +68,28 @@ impl ClientDndGrabHandler for Rose {}
 impl ServerDndGrabHandler for Rose {}
 
 delegate_data_device!(Rose);
+
+// zwp_linux_dmabuf_v1 (buffers shared with the GPU, on the hardware only)
+
+impl DmabufHandler for Rose {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(
+        &mut self,
+        _global: &DmabufGlobal,
+        dmabuf: Dmabuf,
+        notifier: ImportNotifier,
+    ) {
+        match &mut self.tty {
+            Some(tty) => tty.import_dmabuf(&dmabuf, notifier),
+            None => notifier.failed(),
+        }
+    }
+}
+
+delegate_dmabuf!(Rose);
 
 // wl_output and xdg_output
 

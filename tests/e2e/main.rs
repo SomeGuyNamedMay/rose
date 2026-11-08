@@ -520,3 +520,106 @@ fn file_manager_navigates_with_vi_keys() {
     wait_band(&s, x, accent, |band| band.is_none());
     at(&s, (x, top), BACKGROUND);
 }
+
+fn solid_png(path: &std::path::Path, [r, g, b]: [u8; 3]) {
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([r, g, b, 0xFF]))
+        .save(path)
+        .unwrap();
+}
+
+/// Asks the portal backend to set the wallpaper, as xdg-desktop-portal would, and returns its
+/// response from a thread since it may wait for the user.
+fn portal_request(s: &Session, uri: String, preview: bool) -> std::thread::JoinHandle<u32> {
+    use std::collections::HashMap;
+    use zbus::{ObjectPath, Variant};
+
+    let address = s.bus_address();
+    std::thread::spawn(move || {
+        zbus::block_on(async {
+            let bus = zbus::connection::Builder::address(address.as_str())
+                .build()
+                .await
+                .unwrap();
+            let options = HashMap::from([
+                ("show-preview", Variant::from(preview)),
+                ("set-on", Variant::from("background")),
+            ]);
+            let handle = ObjectPath::try_from("/org/freedesktop/portal/desktop/request/t").unwrap();
+            let body = (handle, "org.example.App", "", uri.as_str(), options);
+            // Rose may not have claimed its name yet.
+            for _ in 0..100 {
+                let reply = bus
+                    .call_method(
+                        Some("org.freedesktop.impl.portal.desktop.rose"),
+                        "/org/freedesktop/portal/desktop",
+                        Some("org.freedesktop.impl.portal.Wallpaper"),
+                        "SetWallpaperURI",
+                        &body,
+                    )
+                    .await;
+                match reply {
+                    Ok(reply) => return reply.body().deserialize::<u32>().unwrap(),
+                    Err(zbus::Error::MethodError(name, ..))
+                        if name.as_str().ends_with("ServiceUnknown") =>
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(err) => panic!("portal call failed: {err}"),
+                }
+            }
+            panic!("the portal never appeared");
+        })
+    })
+}
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn wallpaper_portal_sets_the_wallpaper() {
+    let (mut s, _clients) = floating_session();
+    let free = (1100, 700);
+    let menu = (600, 790);
+    let dir = s.config_path.parent().unwrap().to_path_buf();
+    let image = dir.join("from app.png");
+    solid_png(&image, MAGENTA);
+    let uri = format!("file://{}", image.display()).replace(' ', "%20");
+
+    // Things that aren't image files are refused.
+    let bad = portal_request(&s, "file:///dev/zero".into(), false);
+    assert_eq!(bad.join().unwrap(), 2);
+
+    // Without a preview, xdg-desktop-portal has already asked the user.
+    assert_eq!(portal_request(&s, uri.clone(), false).join().unwrap(), 0);
+    at(&s, free, MAGENTA);
+
+    // It's a copy, and a reload keeps it.
+    solid_png(&image, YELLOW);
+    s.input.key(&["alt", "ctrl", "r"]);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    at(&s, free, MAGENTA);
+
+    // With a preview Rose asks, and the first choice keeps the wallpaper.
+    let declined = portal_request(&s, uri.clone(), true);
+    at(&s, menu, BAR_BACKGROUND);
+    s.input.key(&["return"]);
+    assert_eq!(declined.join().unwrap(), 1);
+    at(&s, free, MAGENTA);
+
+    // Closing the menu declines too.
+    let closed = portal_request(&s, uri.clone(), true);
+    at(&s, menu, BAR_BACKGROUND);
+    s.input.key(&["escape"]);
+    assert_eq!(closed.join().unwrap(), 1);
+
+    let accepted = portal_request(&s, uri, true);
+    at(&s, menu, BAR_BACKGROUND);
+    s.input.key(&["down"]);
+    s.input.key(&["return"]);
+    assert_eq!(accepted.join().unwrap(), 0);
+    at(&s, free, YELLOW);
+
+    // Changing the wallpaper in the config takes over again.
+    set_wallpaper(&mut s, "configured.png", "stretch", |path| {
+        solid_png(path, GREEN)
+    });
+    at(&s, free, GREEN);
+}
