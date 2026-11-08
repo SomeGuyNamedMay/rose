@@ -267,7 +267,8 @@ impl Tty {
         }
     }
 
-    fn pause(&mut self, _state: &mut Rose) {
+    fn pause(&mut self, state: &mut Rose) {
+        state.stop_pan_repeat();
         tracing::info!("pausing the session");
         self.libinput.suspend();
         self.manager.pause();

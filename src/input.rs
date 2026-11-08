@@ -26,6 +26,7 @@ enum KeyCommand {
     Action(Action, KeyBinding),
     ModeKey(Keysym),
     MenuKey(Keysym, ModifiersState),
+    PanKey(u32, Keysym),
     ExitInputGrab,
     /// A key was released while moving or resizing with the keyboard.
     EndGrab,
@@ -157,6 +158,12 @@ impl Rose {
             .into()
     }
 
+    /// Tells clients what is under the pointer after views moved beneath it.
+    pub fn refresh_pointer(&mut self) {
+        let location = self.seat.get_pointer().unwrap().current_location();
+        self.move_pointer(location, 0);
+    }
+
     /// Puts the pointer in the middle of the screen.
     pub fn center_pointer(&mut self) {
         let output = self.output_rect();
@@ -174,6 +181,7 @@ impl Rose {
     ) -> (bool, Option<KeyCommand>) {
         let grabbing = matches!(self.mode, Mode::Move | Mode::Resize);
         if state == KeyState::Released {
+            self.release_pan_key(code);
             let forward = !self.suppressed_keys.remove(&code);
             return (forward, grabbing.then_some(KeyCommand::EndGrab));
         }
@@ -204,6 +212,7 @@ impl Rose {
             }
             Mode::Move | Mode::Resize => None,
             Mode::Menu => Some(KeyCommand::MenuKey(handle.modified_sym(), *mods)),
+            Mode::Pan => Some(KeyCommand::PanKey(code, handle.modified_sym())),
             _ => Some(KeyCommand::ModeKey(handle.modified_sym())),
         };
         self.suppressed_keys.insert(code);
@@ -215,6 +224,7 @@ impl Rose {
             KeyCommand::Action(action, binding) => self.run_action(action, Some(binding)),
             KeyCommand::ModeKey(sym) => self.handle_mode_key(sym),
             KeyCommand::MenuKey(sym, mods) => self.handle_menu_key(sym, &mods),
+            KeyCommand::PanKey(code, sym) => self.handle_pan_key(code, sym),
             KeyCommand::ExitInputGrab => self.mode = Mode::Normal,
             KeyCommand::SwitchVt(vt) => {
                 if let Some(tty) = &mut self.tty {

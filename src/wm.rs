@@ -49,6 +49,8 @@ pub enum Mode {
     /// Moving or resizing the focused view with the pointer until a key is released.
     Move,
     Resize,
+    /// Moving the view of the plane with hjkl until Escape is pressed.
+    Pan,
 }
 
 impl Mode {
@@ -60,6 +62,8 @@ impl Mode {
 
 pub struct SheetLayout {
     pub layout: Layout,
+    /// Where the layout is relative to the output, once the camera has moved away from it.
+    pub origin: Point<i32, Logical>,
     /// Tiled views in layout order.
     pub order: Vec<Window>,
 }
@@ -220,7 +224,7 @@ impl Rose {
     }
 
     /// Where view content can go so that borders stay inside the usable area.
-    fn content_area(&self) -> Rectangle<i32, Logical> {
+    pub fn content_area(&self) -> Rectangle<i32, Logical> {
         shrink(self.usable_area(), self.config.ui.border)
     }
 
@@ -320,8 +324,9 @@ impl Rose {
         }
     }
 
-    fn focus_top(&mut self) {
-        let top = self.visible().pop();
+    /// Focuses the topmost view in sight, if any.
+    pub fn focus_top(&mut self) {
+        let top = self.visible().into_iter().rfind(|w| self.on_screen(w));
         self.focus(top);
     }
 
@@ -406,7 +411,8 @@ impl Rose {
 
     pub fn remove_view(&mut self, window: &Window) {
         // Modes act on the focused view, so end them when it goes away.
-        if self.focused.as_ref() == Some(window) && !matches!(self.mode, Mode::Normal | Mode::Menu)
+        if self.focused.as_ref() == Some(window)
+            && !matches!(self.mode, Mode::Normal | Mode::Menu | Mode::Pan)
         {
             let pointer = self.seat.get_pointer().unwrap();
             if pointer.is_grabbed() {
@@ -480,7 +486,13 @@ impl Rose {
 
     /// Applies a view's tile and maximization, or restores its natural geometry if it has neither.
     fn apply_geometry(&mut self, window: &Window) {
-        let area = self.content_area();
+        let mut area = self.content_area();
+        // A tiled view stays maximized inside its layout, wherever the camera is.
+        if let Some(view) = self.view(window).filter(|v| v.tile.is_some()) {
+            if let Some(layout) = &self.sheet_layouts[view.sheet as usize] {
+                area.loc += layout.origin;
+            }
+        }
         let Some(view) = self.view_mut(window) else {
             return;
         };
@@ -667,7 +679,7 @@ impl Rose {
         // Each tile is followed by a gap, so leave one before the first tile too.
         let output = self.work_area();
         let area = Rectangle::new(
-            output.loc + Point::from((gap, gap)),
+            output.loc + layout.origin + Point::from((gap, gap)),
             Size::from((output.size.w - gap, output.size.h - gap)),
         );
         let sizes: Vec<_> = layout.order.iter().map(|w| w.geometry().size).collect();
@@ -747,7 +759,11 @@ impl Rose {
         for window in &order {
             self.show(window);
         }
-        self.sheet_layouts[sheet as usize] = Some(SheetLayout { layout, order });
+        self.sheet_layouts[sheet as usize] = Some(SheetLayout {
+            layout,
+            origin: Point::default(),
+            order,
+        });
         self.arrange_sheet(sheet);
         self.update_workspace();
     }
@@ -771,7 +787,9 @@ impl Rose {
             self.show(window);
         }
 
+        // The layout comes to wherever the camera is.
         let layout = self.sheet_layouts[sheet as usize].as_mut().unwrap();
+        layout.origin = Point::default();
         if append {
             layout.order.extend(new);
         } else {
@@ -864,6 +882,14 @@ impl Rose {
             self.current_sheet = sheet;
         }
         self.set_workspace(|v| (v.sheet == 0 || v.sheet == sheet) && !v.invisible);
+
+        // Don't land on empty space when the sheet's views are elsewhere on the plane.
+        if self.focused.is_none() {
+            if let Some(top) = self.visible().pop() {
+                self.reveal(&top);
+                self.focus(Some(top));
+            }
+        }
     }
 
     fn switch_inhabited(&mut self, next: bool) {
@@ -921,6 +947,7 @@ impl Rose {
             (Cycle::Next, None) => 0,
             (Cycle::Prev, None) => n - 1,
         };
+        self.reveal(&candidates[index]);
         self.focus(Some(candidates[index].clone()));
     }
 
@@ -954,6 +981,9 @@ impl Rose {
             .into_iter()
             .rev()
             .find(|w| self.in_group(w, &groups[index]));
+        if let Some(window) = &top {
+            self.reveal(window);
+        }
         self.focus(top);
     }
 
@@ -1000,6 +1030,7 @@ impl Rose {
         // Showing a view from another sheet borrows it into the workspace.
         self.show(&window);
         self.update_workspace();
+        self.reveal(&window);
         self.focus(Some(window));
     }
 
@@ -1018,7 +1049,10 @@ impl Rose {
 
     fn enter_mode(&mut self, kind: ModeKind, trigger: Option<KeyBinding>) {
         if self.focused.is_none()
-            && !matches!(kind, ModeKind::MarkSelect | ModeKind::MarkSwitchSelect)
+            && !matches!(
+                kind,
+                ModeKind::MarkSelect | ModeKind::MarkSwitchSelect | ModeKind::Pan
+            )
         {
             return;
         }
@@ -1030,6 +1064,14 @@ impl Rose {
             ModeKind::MarkSelect => Mode::MarkSelect { switch: false },
             ModeKind::MarkSwitchSelect => Mode::MarkSelect { switch: true },
             ModeKind::SheetAssign => Mode::SheetAssign,
+            ModeKind::Pan => {
+                if !matches!(self.mode, Mode::Normal)
+                    || self.seat.get_pointer().unwrap().is_grabbed()
+                {
+                    return;
+                }
+                Mode::Pan
+            }
             ModeKind::InputGrab => match trigger {
                 Some(exit) => Mode::InputGrab { exit },
                 None => return,

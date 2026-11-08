@@ -66,6 +66,8 @@ pub fn init_winit(
                 state.arrange_all();
             }
             WinitEvent::Input(event) => state.process_input_event(event),
+            // Keys released while the window is unfocused are never reported.
+            WinitEvent::Focus(false) => state.stop_pan_repeat(),
             WinitEvent::Redraw => {
                 let size = backend.window_size();
                 let damage = Rectangle::from_size(size);

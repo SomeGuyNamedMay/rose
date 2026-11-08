@@ -8,6 +8,7 @@ mod handlers;
 mod input;
 mod layout;
 mod menu;
+mod plane;
 mod portal;
 mod render;
 mod state;

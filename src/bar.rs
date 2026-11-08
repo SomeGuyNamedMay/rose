@@ -495,7 +495,10 @@ impl Rose {
             sheets,
             title,
             tabs,
-            mode: self.mode.describe(),
+            mode: match self.mode {
+                Mode::Pan => format!("pan: {}, {}", self.camera.x, self.camera.y),
+                _ => self.mode.describe(),
+            },
             mode_color,
             status: self.bar.status.clone(),
         }
@@ -564,6 +567,7 @@ impl Rose {
         match target {
             Some(Target::Sheet(sheet)) => self.switch_to_sheet(sheet),
             Some(Target::View(window)) => {
+                self.reveal(&window);
                 self.raise(&window);
                 self.focus(Some(window));
             }
@@ -587,6 +591,7 @@ impl Mode {
             Mode::Move => "move".into(),
             Mode::Resize => "resize".into(),
             Mode::Menu => "menu".into(),
+            Mode::Pan => "pan".into(),
         }
     }
 }

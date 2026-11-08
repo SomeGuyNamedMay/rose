@@ -12,7 +12,7 @@ use smithay::{
         calloop::{
             channel::{self, Event as ChannelEvent},
             generic::Generic,
-            EventLoop, Interest, LoopSignal, Mode, PostAction,
+            EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction, RegistrationToken,
         },
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
@@ -34,6 +34,7 @@ use smithay::{
 };
 
 use crate::{
+    action::Direction,
     bar::Bar,
     config::Config,
     cursor::Cursors,
@@ -49,6 +50,7 @@ pub struct Rose {
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
     pub loop_signal: LoopSignal,
+    pub loop_handle: LoopHandle<'static, Rose>,
 
     pub config: Config,
     pub config_path: PathBuf,
@@ -66,6 +68,12 @@ pub struct Rose {
     pub sheet_layouts: [Option<SheetLayout>; 10],
     pub marks: HashMap<char, Window>,
     pub mode: WmMode,
+    /// How far the view of the plane has moved from where it started.
+    pub camera: Point<i32, Logical>,
+    /// Keys held in pan mode, with the direction each one pans.
+    pub pan_keys: Vec<(u32, Direction)>,
+    /// Repeats panning while keys are held.
+    pub pan_timer: Option<RegistrationToken>,
     /// Keys and buttons whose press was consumed by a binding, so their release is consumed too.
     pub suppressed_keys: HashSet<u32>,
     pub suppressed_buttons: HashSet<u32>,
@@ -101,7 +109,7 @@ pub struct Rose {
 
 impl Rose {
     pub fn new(
-        event_loop: &mut EventLoop<Self>,
+        event_loop: &mut EventLoop<'static, Self>,
         display: Display<Self>,
         config: Config,
         config_path: PathBuf,
@@ -182,6 +190,7 @@ impl Rose {
             socket_name,
             display_handle: dh,
             loop_signal: event_loop.get_signal(),
+            loop_handle: event_loop.handle(),
 
             config,
             config_path,
@@ -197,6 +206,9 @@ impl Rose {
             sheet_layouts: Default::default(),
             marks: HashMap::new(),
             mode: WmMode::Normal,
+            camera: Point::default(),
+            pan_keys: Vec::new(),
+            pan_timer: None,
             suppressed_keys: HashSet::new(),
             suppressed_buttons: HashSet::new(),
             cursor_status: CursorImageStatus::default_named(),

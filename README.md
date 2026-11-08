@@ -57,7 +57,8 @@ most logo-key shortcuts while Rose runs nested inside them. Some highlights:
 | Alt+A / Alt+Shift+L | add views to the layout / reset the layout |
 | Alt+F | toggle maximize |
 | Alt+G, type a name, Return | assign the focused view to a group |
-| Alt+M, a letter, Return | mark the focused view |
+| Alt+M, then h/j/k/l, Escape | move around the infinite desktop |
+| Alt+Ctrl+M, a letter, Return | mark the focused view |
 | Alt+' then a letter | show the marked view |
 | Alt+D / Alt+; | open the application / action menu |
 | Alt+drag / Alt+right-drag | move / resize |
@@ -233,6 +234,10 @@ while Rose isn't running.
 
 ## Window management
 
+- **The desktop is an infinite plane**, shared by all sheets, and the output shows part of it.
+  `mode-enter-pan` (Alt+M) lets h/j/k/l move the view by `step`, for as long as they are held, until
+  Escape. The bar shows the position. Going to a view that is out of sight, by cycling, a mark, the
+  bar or a menu, moves the view of the plane to it. The wallpaper and bar stay put.
 - **Sheets 1-9** hold views; switching sheets replaces what's shown. Views on **sheet 0** are always
   visible, below the others. Switching to the current sheet resets it.
 - **Groups** are named sets of views that can span sheets. A view's group defaults to its app id.
@@ -242,7 +247,7 @@ while Rose isn't running.
 - **Layouts** are binary split trees of containers (`single`, `stack`, `queue`, `grid`, `full`,
   `empty`) stored in registers. They tile a sheet on demand; new views float until restacked.
   `layout-exchange-view-*` and `layout-cycle-view-*` work on the layout order.
-- **Modes**: group-assign, mark-assign, mark-select, mark-switch-select, sheet-assign,
+- **Modes**: group-assign, mark-assign, mark-select, mark-switch-select, sheet-assign, pan,
   input-grab (all keys go to the focused view until the binding is pressed again), and keyboard
   move/resize (hold the binding and move the pointer; releasing a key ends it). While a mode waits
   for input, the focused view's border uses the `insert` color, or `conflict` for a taken mark.

@@ -192,13 +192,17 @@ satellite = "xwayland-satellite"  # a command in PATH, or a path
 "AS+Return" = "layout-exchange-view-main"
 
 "A+g" = "mode-enter-group-assign"
-"A+m" = "mode-enter-mark-assign"
+"AC+m" = "mode-enter-mark-assign"
 "A+apostrophe" = "mode-enter-mark-select"
 "AS+apostrophe" = "mode-enter-mark-switch-select"
 "A+s" = "mode-enter-sheet-assign"
 "AS+i" = "mode-enter-input-grab"
 "AS+m" = "mode-enter-move"
 "AS+e" = "mode-enter-resize"
+
+# The desktop is an infinite plane. In this mode h, j, k and l move the view of it by `step`, for
+# as long as they are held, and Escape leaves the mode.
+"A+m" = "mode-enter-pan"
 
 "A+d" = "menu-applications"
 "AS+d" = "menu-run"

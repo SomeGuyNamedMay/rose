@@ -88,6 +88,61 @@ fn layout_tiles_views_topmost_first() {
 
 #[test]
 #[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn panning_moves_the_view_of_the_plane() {
+    let (mut s, _clients) = floating_session();
+    at(&s, RED_CENTER, RED);
+    at(&s, BLUE_CENTER, BLUE);
+
+    // In the mode, keys pan instead of reaching bindings or views. Moving the view right and
+    // down slides the views left and up.
+    s.input.key(&["alt", "p"]);
+    s.input.key(&["l"]);
+    s.input.key(&["j"]);
+    at(&s, (RED_CENTER.0 - 100, RED_CENTER.1 - 100), RED);
+    at(&s, (BLUE_CENTER.0 - 100, BLUE_CENTER.1 - 100), BLUE);
+    at(&s, (RED_CENTER.0 + 100, RED_CENTER.1 + 100), BACKGROUND);
+
+    // Holding a key keeps panning. One step would leave blue's border on this pixel.
+    s.input.hold("l");
+    at(&s, BLUE_CENTER, BACKGROUND);
+    s.input.release("l");
+
+    // Pan until every view is out of sight.
+    for _ in 0..12 {
+        s.input.key(&["l"]);
+    }
+    at(&s, (600, 200), BACKGROUND);
+
+    // Escape leaves the mode and, with nothing in sight, focus is dropped. Cycling then starts at
+    // the first view and brings it back into the top left of the content area.
+    s.input.key(&["escape"]);
+    s.input.key(&["alt", "j"]);
+    at(&s, (216, 166), RED);
+    at(&s, (13, 100), ACTIVE);
+}
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn tiles_stay_together_on_the_plane() {
+    let (mut s, _clients) = tiled_session();
+    at(&s, MAIN_CENTER, BLUE);
+
+    s.input.key(&["alt", "p"]);
+    s.input.key(&["h"]);
+    s.input.key(&["escape"]);
+    at(&s, (MAIN_CENTER.0 + 100, MAIN_CENTER.1), BLUE);
+    at(&s, (STACK_TOP_CENTER.0 + 100, STACK_TOP_CENTER.1), GREEN);
+
+    // Maximizing and restoring a tile keeps the layout where it is on the plane.
+    s.input.key(&["alt", "f"]);
+    at(&s, (900, 400), BLUE);
+    s.input.key(&["alt", "f"]);
+    at(&s, (MAIN_CENTER.0 + 100, MAIN_CENTER.1), BLUE);
+    at(&s, (STACK_TOP_CENTER.0 + 100, STACK_TOP_CENTER.1), GREEN);
+}
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
 fn cycle_maximize_and_exchange_with_main() {
     let (mut s, _clients) = tiled_session();
     at(&s, MAIN_CENTER, BLUE);

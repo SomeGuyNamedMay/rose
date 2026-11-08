@@ -54,6 +54,7 @@ pub enum ModeKind {
     MarkSelect,
     MarkSwitchSelect,
     Move,
+    Pan,
     Resize,
     SheetAssign,
 }
@@ -208,6 +209,7 @@ fn mode(s: &str) -> Option<ModeKind> {
         "mark-select" => ModeKind::MarkSelect,
         "mark-switch-select" => ModeKind::MarkSwitchSelect,
         "move" => ModeKind::Move,
+        "pan" => ModeKind::Pan,
         "resize" => ModeKind::Resize,
         "sheet-assign" => ModeKind::SheetAssign,
         _ => return None,
@@ -336,6 +338,7 @@ pub fn all_names() -> Vec<String> {
             "mark-select",
             "mark-switch-select",
             "move",
+            "pan",
             "resize",
             "sheet-assign",
         ],
