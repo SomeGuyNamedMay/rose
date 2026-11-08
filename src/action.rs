@@ -71,6 +71,8 @@ pub enum MenuSource {
     Actions,
     /// Layout registers, to apply one.
     Layouts,
+    /// A ranger-like file manager.
+    Files,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -313,7 +315,17 @@ pub fn all_names() -> Vec<String> {
     let cycles = ["next", "prev", "first", "last"];
     names.extend(with("group-cycle-view-", &cycles));
     names.extend(with("layout-cycle-view-", &cycles));
-    names.extend(with("menu-", &["applications", "run", "views", "actions", "layouts"]));
+    names.extend(with(
+        "menu-",
+        &[
+            "applications",
+            "run",
+            "views",
+            "actions",
+            "layouts",
+            "files",
+        ],
+    ));
     names.extend(with(
         "mode-enter-",
         &[
@@ -357,6 +369,7 @@ fn menu_source(s: &str) -> Option<MenuSource> {
         "views" => MenuSource::Views,
         "actions" => MenuSource::Actions,
         "layouts" => MenuSource::Layouts,
+        "files" => MenuSource::Files,
         _ => return None,
     })
 }

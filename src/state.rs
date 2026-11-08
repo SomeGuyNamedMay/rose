@@ -28,6 +28,7 @@ use smithay::{
         shell::xdg::{decoration::XdgDecorationState, XdgShellState},
         shm::ShmState,
         socket::ListeningSocketSource,
+        viewporter::ViewporterState,
     },
 };
 
@@ -35,7 +36,9 @@ use crate::{
     bar::Bar,
     config::Config,
     menu::Menu,
+    wallpaper::Wallpaper,
     wm::{Mode as WmMode, SheetLayout, View},
+    xwayland::Xwayland,
 };
 
 pub struct Rose {
@@ -68,6 +71,11 @@ pub struct Rose {
     pub quit_requested: bool,
     pub bar: Bar,
     pub menu: Option<Menu>,
+    pub wallpaper: Wallpaper,
+    /// Where the file manager was last closed.
+    pub files_dir: Option<PathBuf>,
+    /// Present while Rose is serving an X display through xwayland-satellite.
+    pub xwayland: Option<Xwayland>,
 
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
@@ -76,6 +84,7 @@ pub struct Rose {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Rose>,
     pub data_device_state: DataDeviceState,
+    pub viewporter_state: ViewporterState,
 
     pub seat: Seat<Self>,
 }
@@ -95,6 +104,7 @@ impl Rose {
         let shm_state = ShmState::new::<Self>(&dh, vec![]);
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let viewporter_state = ViewporterState::new::<Self>(&dh);
 
         // A single seat with a keyboard and pointer that are assumed to always be present.
         let mut seat_state = SeatState::new();
@@ -134,7 +144,18 @@ impl Rose {
         let mut bar = Bar::new(status_sender);
         bar.configure(&config.bar);
 
-        Self {
+        // Wallpapers decoded on another thread.
+        let (wallpaper_sender, wallpaper_channel) = channel::channel();
+        event_loop
+            .handle()
+            .insert_source(wallpaper_channel, |event, _, state: &mut Self| {
+                if let ChannelEvent::Msg((generation, frames)) = event {
+                    state.wallpaper.set_frames(generation, frames);
+                }
+            })
+            .expect("failed to insert the wallpaper channel");
+
+        let mut state = Self {
             start_time: std::time::Instant::now(),
             socket_name,
             display_handle: dh,
@@ -160,6 +181,9 @@ impl Rose {
             quit_requested: false,
             bar,
             menu: None,
+            wallpaper: Wallpaper::new(wallpaper_sender),
+            files_dir: None,
+            xwayland: None,
 
             compositor_state,
             xdg_shell_state,
@@ -168,9 +192,12 @@ impl Rose {
             output_manager_state,
             seat_state,
             data_device_state,
+            viewporter_state,
 
             seat,
-        }
+        };
+        state.wallpaper.configure(state.wallpaper_path());
+        state
     }
 
     fn init_wayland_listener(display: Display<Self>, event_loop: &mut EventLoop<Self>) -> OsString {

@@ -1143,6 +1143,7 @@ impl Rose {
         let keyboard_changed = config.keyboard != self.config.keyboard;
         self.config = config;
         self.bar.configure(&self.config.bar);
+        self.wallpaper.configure(self.wallpaper_path());
         if let Some(menu) = &mut self.menu {
             menu.lines = self.config.menu.lines.max(1);
             menu.dirty = true;

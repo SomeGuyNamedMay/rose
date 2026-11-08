@@ -1,6 +1,7 @@
 mod action;
 mod bar;
 mod config;
+mod files;
 mod grab;
 mod handlers;
 mod input;
@@ -9,8 +10,10 @@ mod menu;
 mod render;
 mod state;
 mod text;
+mod wallpaper;
 mod winit;
 mod wm;
+mod xwayland;
 
 use std::path::PathBuf;
 
@@ -53,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = Rose::new(&mut event_loop, display, config, config_path);
 
     winit::init_winit(&mut event_loop, &mut state)?;
+    xwayland::init(&mut event_loop, &mut state);
 
     // Launch a client: `rose -c <command>`, or the configured terminal by default.
     if let Some(command) = command.or_else(|| state.config.actions.get("terminal").cloned()) {

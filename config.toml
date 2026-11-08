@@ -17,6 +17,12 @@ grouped = 0xFDAF53
 insert = 0xE3C3FA
 conflict = 0xED6B32
 
+# Shown behind all views: a still image, or an animated GIF, PNG or WebP. The path may start with
+# `~/`; a relative path is relative to this file.
+[ui.wallpaper]
+# path = "~/Pictures/wallpaper.gif"
+mode = "fill"  # fill (cover, cropping), fit (with the background color around), stretch or center
+
 # The bar, styled after Nyxt's status buffer. From left to right it shows the sheets in use (click
 # one to switch to it), the focused view, the other visible views (click one to focus it), the
 # status line and the mode, including anything typed into the mode so far.
@@ -44,8 +50,14 @@ on-accent = 0x101216
 # `menu-actions`. Type to filter; Up/Down, Tab or Ctrl+N/P select; Return or a click accepts;
 # Escape, Ctrl+G or a click elsewhere closes. In `menu-run`, Shift+Return runs the typed text as
 # a command, which Return also does when nothing matches. Ctrl+A/E/U/K/W edit like a shell.
+#
+# `menu-files` turns the menu into a file manager like ranger: the parent directory, the current
+# one and a preview. j/k move, h goes up, l or Return enters a directory or opens a file, gg/G go
+# to the top/bottom, gh or ~ go home, zh or Backspace toggle hidden files, / filters (Return keeps
+# the filter, Escape clears it), S opens the terminal in the directory and q or Escape closes.
 [menu]
 lines = 10
+opener = "xdg-open"  # opens files from the file manager
 
 # Commands bound as `action-<name>`. They run through `sh -c`. Applications with `Terminal=true`
 # open with `terminal -e`.
@@ -86,6 +98,13 @@ m = { top = "single", bottom = { views = 4, layout = "queue" }, scale = 0.7 }
 repeat-delay = 600
 repeat-rate = 25
 # xkb = { layout = "us", options = "caps:escape" }
+
+# X11 apps run through xwayland-satellite (0.7 or newer), which Rose starts on the first X11
+# connection if it is installed. X11 apps get their app id from WM_CLASS. Changes take effect on
+# restart.
+[xwayland]
+enabled = true
+satellite = "xwayland-satellite"  # a command in PATH, or a path
 
 # Bindings are `"<modifiers>+<keysym>"` or `"<modifiers>-<keycode>"`. Modifiers are L (logo),
 # S (shift), C (control), A (alt) and 5 (AltGr); use 0 for none. Keysyms are unshifted, so
@@ -185,6 +204,7 @@ repeat-rate = 25
 "AS+d" = "menu-run"
 "A+slash" = "menu-views"
 "A+semicolon" = "menu-actions"
+"A+e" = "menu-files"
 
 [bindings.mouse]
 "A+left" = "mode-enter-move"

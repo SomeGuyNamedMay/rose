@@ -1,6 +1,6 @@
 use smithay::{
     backend::renderer::utils::on_commit_buffer_handler,
-    delegate_compositor, delegate_shm,
+    delegate_compositor, delegate_shm, delegate_viewporter,
     reexports::wayland_server::{
         protocol::{wl_buffer, wl_surface::WlSurface},
         Client,
@@ -56,3 +56,7 @@ impl ShmHandler for Rose {
 
 delegate_compositor!(Rose);
 delegate_shm!(Rose);
+
+// wp_viewporter, which xwayland-satellite needs
+
+delegate_viewporter!(Rose);

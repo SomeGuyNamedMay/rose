@@ -27,6 +27,7 @@ pub struct Config {
     /// Rules for new views, keyed by app id.
     pub views: HashMap<String, ViewRule>,
     pub keyboard: KeyboardConfig,
+    pub xwayland: XwaylandConfig,
 }
 
 #[derive(Deserialize, Default)]
@@ -41,6 +42,7 @@ struct RawConfig {
     marks: HashMap<char, String>,
     views: HashMap<String, ViewRule>,
     inputs: Inputs,
+    xwayland: XwaylandConfig,
 }
 
 #[derive(Deserialize, Default)]
@@ -66,6 +68,7 @@ pub struct Ui {
     /// Pixels that keyboard move and resize actions change a view by.
     pub step: i32,
     pub colorscheme: Colorscheme,
+    pub wallpaper: WallpaperConfig,
 }
 
 impl Default for Ui {
@@ -75,6 +78,7 @@ impl Default for Ui {
             gap: 5,
             step: 100,
             colorscheme: Colorscheme::default(),
+            wallpaper: WallpaperConfig::default(),
         }
     }
 }
@@ -107,6 +111,27 @@ impl Default for Colorscheme {
             conflict: Color::rgb(0xED6B32),
         }
     }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WallpaperConfig {
+    /// A still image or an animated GIF, PNG or WebP.
+    pub path: Option<PathBuf>,
+    pub mode: WallpaperMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WallpaperMode {
+    /// Covers the output, cropping the image.
+    #[default]
+    Fill,
+    /// Shows the whole image, with the background color around it.
+    Fit,
+    Stretch,
+    /// Unscaled, in the middle of the output.
+    Center,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -179,11 +204,34 @@ impl Default for Theme {
 pub struct MenuConfig {
     /// How many items the menu shows at once.
     pub lines: usize,
+    /// The command the file manager opens files with.
+    pub opener: String,
 }
 
 impl Default for MenuConfig {
     fn default() -> Self {
-        Self { lines: 10 }
+        Self {
+            lines: 10,
+            opener: "xdg-open".into(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct XwaylandConfig {
+    /// Whether to serve an X display when xwayland-satellite is available.
+    pub enabled: bool,
+    /// The xwayland-satellite command.
+    pub satellite: String,
+}
+
+impl Default for XwaylandConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            satellite: "xwayland-satellite".into(),
+        }
     }
 }
 
@@ -513,6 +561,7 @@ impl Config {
             marks: raw.marks,
             views: raw.views,
             keyboard: raw.inputs.keyboard,
+            xwayland: raw.xwayland,
         })
     }
 

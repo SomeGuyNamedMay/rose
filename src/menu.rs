@@ -16,6 +16,7 @@ use smithay::{
 use crate::{
     action::{self, Action, MenuSource},
     config::Theme,
+    files::Files,
     text::{Canvas, Font},
     wm::{self, Mode},
     Rose,
@@ -61,6 +62,8 @@ pub struct Menu {
     pub lines: usize,
     /// Column widths in pixels, measured on the first paint.
     widths: Option<Vec<i32>>,
+    /// The file manager, which replaces the list of items when browsing files.
+    files: Option<Files>,
     /// Whether the menu changed since it was last painted.
     pub dirty: bool,
 }
@@ -82,6 +85,8 @@ impl MenuSource {
                 &["Action", "Binding", "Command"],
             ),
             Self::Layouts => ("Apply layout", "Layouts", &["Register", "Layout"]),
+            // Painted by the file manager.
+            Self::Files => ("Files", "Files", &[]),
         }
     }
 }
@@ -98,9 +103,16 @@ impl Menu {
             scroll: 0,
             lines: lines.max(1),
             widths: None,
+            files: None,
             dirty: true,
         };
         menu.refilter();
+        menu
+    }
+
+    pub fn files(files: Files, lines: usize) -> Self {
+        let mut menu = Self::new(MenuSource::Files, Vec::new(), lines);
+        menu.files = Some(files);
         menu
     }
 
@@ -151,6 +163,11 @@ impl Menu {
 
     /// Moves the selection by `by` items, wrapping around at either end when moving by one.
     pub fn move_selection(&mut self, by: isize) {
+        self.dirty = true;
+        if let Some(files) = &mut self.files {
+            files.move_selection(by);
+            return;
+        }
         let n = self.matches.len() as isize;
         let index = self.selected as isize + by;
         if by.abs() == 1 && n > 0 {
@@ -158,7 +175,6 @@ impl Menu {
         } else {
             self.select(index);
         }
-        self.dirty = true;
     }
 
     fn selected_target(&self) -> Option<Target> {
@@ -169,6 +185,10 @@ impl Menu {
 
     /// Accepts the item shown on `row`, counting from the first item row.
     pub fn accept_row(&mut self, row: usize) -> Option<Target> {
+        if let Some(files) = &mut self.files {
+            self.dirty = true;
+            return files.accept_row(row);
+        }
         let index = self.scroll + row;
         (index < self.matches.len()).then(|| {
             self.selected = index;
@@ -209,6 +229,9 @@ impl Menu {
 
     pub fn key(&mut self, sym: Keysym, mods: &ModifiersState) -> MenuEvent {
         self.dirty = true;
+        if let Some(files) = &mut self.files {
+            return files.key(sym, mods, self.lines);
+        }
         let input = self.input.clone();
         let page = self.lines as isize;
 
@@ -288,6 +311,11 @@ impl Menu {
 
     /// Paints the menu, `row` pixels per row.
     pub fn paint(&mut self, canvas: &mut Canvas, font: &mut Font, theme: &Theme, row: i32) {
+        self.dirty = false;
+        if let Some(files) = &mut self.files {
+            files.paint(canvas, font, theme, row, self.lines);
+            return;
+        }
         let (prompt, source, headers) = self.source.labels();
         let width = canvas.width;
         let pad = font.width(" ").max(4);
@@ -383,11 +411,10 @@ impl Menu {
                 });
             }
         }
-        self.dirty = false;
     }
 }
 
-fn lowercase(s: &str) -> Vec<char> {
+pub fn lowercase(s: &str) -> Vec<char> {
     // One char each, so indices still line up with the original text.
     s.chars()
         .map(|c| c.to_lowercase().next().unwrap_or(c))
@@ -396,7 +423,7 @@ fn lowercase(s: &str) -> Vec<char> {
 
 /// Scores an item against the input's terms, each of which has to match one of the columns.
 /// Returns the score and the matched character indices of each column.
-fn score(terms: &[Vec<char>], columns: &[String]) -> Option<(i64, Vec<Vec<usize>>)> {
+pub fn score(terms: &[Vec<char>], columns: &[String]) -> Option<(i64, Vec<Vec<usize>>)> {
     let columns: Vec<Vec<char>> = columns.iter().map(|c| lowercase(c)).collect();
     let mut highlights = vec![Vec::new(); columns.len()];
     let mut total = 0;
@@ -697,6 +724,7 @@ impl Rose {
                     })
                     .collect()
             }
+            MenuSource::Files => Vec::new(),
         }
     }
 
@@ -704,12 +732,28 @@ impl Rose {
         if !matches!(self.mode, Mode::Normal) {
             return;
         }
-        let items = self.menu_items(source);
-        self.menu = Some(Menu::new(source, items, self.config.menu.lines));
+        let lines = self.config.menu.lines;
+        self.menu = Some(if source == MenuSource::Files {
+            // Back where the file manager was last closed.
+            let home = std::env::var_os("HOME").map(PathBuf::from);
+            let dir = [self.files_dir.clone(), home]
+                .into_iter()
+                .flatten()
+                .find(|d| d.is_dir())
+                .unwrap_or_else(|| "/".into());
+            let opener = self.config.menu.opener.clone();
+            let terminal = self.config.actions.get("terminal").cloned();
+            Menu::files(Files::new(dir, opener, terminal), lines)
+        } else {
+            Menu::new(source, self.menu_items(source), lines)
+        });
         self.mode = Mode::Menu;
     }
 
     pub fn close_menu(&mut self) {
+        if let Some(files) = self.menu.as_ref().and_then(|m| m.files.as_ref()) {
+            self.files_dir = Some(files.dir().to_path_buf());
+        }
         self.menu = None;
         if matches!(self.mode, Mode::Menu) {
             self.mode = Mode::Normal;

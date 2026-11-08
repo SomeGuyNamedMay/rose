@@ -389,3 +389,134 @@ fn menu_switches_views_and_runs_actions() {
     s.input.click(600, 100);
     at(&s, (600, 700), BLUE);
 }
+
+/// Writes `image` next to the config, then reloads with it as the wallpaper.
+fn set_wallpaper(s: &mut Session, name: &str, mode: &str, write: impl FnOnce(&std::path::Path)) {
+    write(&s.config_path.parent().unwrap().join(name));
+    let config = std::fs::read_to_string(&s.config_path).unwrap();
+    s.write_config(&format!(
+        "{config}\n[ui.wallpaper]\npath = \"{name}\"\nmode = \"{mode}\"\n"
+    ));
+    s.input.key(&["alt", "ctrl", "r"]);
+}
+
+const MAGENTA: [u8; 3] = [0xFF, 0x00, 0xFF];
+const YELLOW: [u8; 3] = [0xFF, 0xFF, 0x00];
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn still_wallpaper_is_stretched() {
+    let (mut s, _clients) = floating_session();
+    set_wallpaper(&mut s, "wallpaper.png", "stretch", |path| {
+        image::RgbaImage::from_fn(2, 1, |x, _| {
+            let [r, g, b] = if x == 0 { MAGENTA } else { YELLOW };
+            image::Rgba([r, g, b, 0xFF])
+        })
+        .save(path)
+        .unwrap();
+    });
+    at(&s, (100, 700), MAGENTA);
+    at(&s, (1100, 700), YELLOW);
+    // Views stay above it.
+    at(&s, RED_CENTER, RED);
+}
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn gif_wallpaper_animates() {
+    use image::{codecs::gif::GifEncoder, Delay, Frame, Rgba, RgbaImage};
+
+    let (mut s, _clients) = floating_session();
+    set_wallpaper(&mut s, "wallpaper.gif", "fit", |path| {
+        let frame = |[r, g, b]: [u8; 3]| {
+            Frame::from_parts(
+                RgbaImage::from_pixel(1, 1, Rgba([r, g, b, 0xFF])),
+                0,
+                0,
+                Delay::from_numer_denom_ms(400, 1),
+            )
+        };
+        let mut encoder = GifEncoder::new(std::fs::File::create(path).unwrap());
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        encoder
+            .encode_frames([frame(MAGENTA), frame(YELLOW)])
+            .unwrap();
+    });
+    // A square image fits in the middle 800x800 of the output, with the background beside it.
+    at(&s, (250, 700), MAGENTA);
+    at(&s, (250, 700), YELLOW);
+    at(&s, (250, 700), MAGENTA);
+    at(&s, (100, 700), BACKGROUND);
+}
+
+#[test]
+#[ignore = "needs sway, grim, xwayland-satellite and xterm; run with `cargo test --test e2e -- --ignored`"]
+fn x11_apps_run_through_xwayland_satellite() {
+    // xwayland-satellite gives X11 views their WM_CLASS as the app id.
+    let mut s = Session::start(
+        r#"
+[actions]
+xterm = "xterm -bg '#00FF00' -geometry 40x10"
+[views.XTerm]
+position = { x = 300, y = 300 }
+"#,
+    );
+    s.input.key(&["alt", "semicolon"]);
+    s.input.type_text("xterm");
+    s.input.key(&["return"]);
+    at(&s, (400, 350), GREEN);
+}
+
+/// The top and height of the band of `color` in column `x`, polling until `check` accepts it.
+#[track_caller]
+fn wait_band(
+    s: &Session,
+    x: u32,
+    color: [u8; 3],
+    check: impl Fn(Option<(u32, u32)>) -> bool,
+) -> Option<(u32, u32)> {
+    let start = std::time::Instant::now();
+    loop {
+        let shot = s.screenshot();
+        let ys: Vec<u32> = (0..OUTPUT_HEIGHT)
+            .filter(|&y| shot.pixel(x, y) == color)
+            .collect();
+        let band = ys.first().map(|&top| (top, ys.len() as u32));
+        if check(band) {
+            return band;
+        }
+        assert!(
+            start.elapsed().as_secs() < 5,
+            "band of {color:?} at x = {x} is {band:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+#[ignore = "needs sway and grim; run with `cargo test --test e2e -- --ignored`"]
+fn file_manager_navigates_with_vi_keys() {
+    let mut s = Session::start("");
+    // The selected entry of the current directory, in the middle pane, is highlighted.
+    let accent = [0x37, 0xA8, 0xE4];
+    let x = 300;
+
+    s.input.key(&["alt", "semicolon"]);
+    s.input.type_text("menu-files");
+    s.input.key(&["return"]);
+    // To the root, which has entries wherever the test runs.
+    s.input.key(&["g"]);
+    s.input.key(&["slash"]);
+    let (top, height) = wait_band(&s, x, accent, |band| band.is_some()).unwrap();
+
+    s.input.key(&["j"]);
+    wait_band(&s, x, accent, |band| band == Some((top + height, height)));
+    s.input.key(&["k"]);
+    wait_band(&s, x, accent, |band| band == Some((top, height)));
+
+    s.input.key(&["q"]);
+    wait_band(&s, x, accent, |band| band.is_none());
+    at(&s, (x, top), BACKGROUND);
+}

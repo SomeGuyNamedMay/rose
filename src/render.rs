@@ -1,5 +1,5 @@
-//! Builds the frame: the menu and bar, views in stacking order with their borders, and the
-//! client's cursor.
+//! Builds the frame: the menu and bar, views in stacking order with their borders, the client's
+//! cursor and the wallpaper.
 
 use smithay::{
     backend::renderer::{
@@ -96,6 +96,7 @@ impl Rose {
             }
         }
 
+        elements.extend(self.wallpaper_element(renderer));
         elements
     }
 }

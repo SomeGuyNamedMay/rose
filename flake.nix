@@ -64,6 +64,9 @@
             # Unwrapped, since the wrapper needs a D-Bus session.
             pkgs.sway-unwrapped
             pkgs.grim
+            # For the X11 test.
+            pkgs.xwayland-satellite
+            pkgs.xterm
           ];
           cargoTestFlags = [
             "--test"
@@ -92,6 +95,8 @@
             # For the end-to-end tests.
             sway
             grim
+            xwayland-satellite
+            xterm
           ];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (runtimeLibs pkgs);
         };

@@ -23,6 +23,15 @@ Rose reads `$XDG_CONFIG_HOME/rose/config.toml` (usually `~/.config/rose/config.t
 to the built-in [`config.toml`](config.toml), which documents every option. Copy it as a starting
 point. The `reload` action (Alt+Ctrl+R) re-reads it without restarting.
 
+To set a wallpaper, point `[ui.wallpaper]` at a still image (PNG, JPEG, WebP or GIF) or an animated
+GIF, PNG or WebP:
+
+```toml
+[ui.wallpaper]
+path = "~/Pictures/wallpaper.gif"
+mode = "fill"  # or "fit", "stretch", "center"
+```
+
 The default bindings use **Alt** instead of hikari's logo key, because desktops like GNOME reserve
 most logo-key shortcuts while Rose runs nested inside them. Some highlights:
 
@@ -85,14 +94,35 @@ matching. It opens next to the bar:
 | Alt+Shift+D | `menu-run`: programs in `PATH`, or any typed command (Shift+Return) |
 | Alt+/ | `menu-views`: switch to a view on any sheet |
 | Alt+; | `menu-actions`: run any action, showing its binding |
+| Alt+E | `menu-files`: a file manager like ranger |
 
 Up/Down, Tab or Ctrl+N/P select, Return or a click accepts, and Escape, Ctrl+G or a click elsewhere
 closes it. Fonts and colors are under `[bar]` in the config.
 
+The file manager shows the parent directory, the current one and a preview of the selected entry
+(a directory's contents, a text file's first lines, or an image's size), and reopens where it was
+closed. Its keys follow ranger's:
+
+| Keys | Does |
+| --- | --- |
+| j/k, Up/Down | select the next/previous entry |
+| J/K, Page Down/Up, Ctrl+D/U | move a page or half a page |
+| h, Left | go to the parent directory |
+| l, Right, Return | enter the directory, or open the file with `opener` (`xdg-open` by default) |
+| gg/G | go to the first/last entry |
+| gh or ~, g/ | go home, or to the root |
+| zh, Backspace | show or hide dotfiles |
+| / | filter the directory (Return keeps the filter, Escape clears it) |
+| S | open the `terminal` action in the directory |
+| q, Escape | close |
+
 ## Differences from hikari
 
 - Instead of indicator bars on each view, one bar shows the focused view and what modes have typed.
-- Single output, nested only; no DRM/libinput backend, layer-shell, XWayland or screen locking.
+- Single output, nested only; no DRM/libinput backend, layer-shell or screen locking.
+- X11 apps run through [xwayland-satellite](https://github.com/Supreeeme/xwayland-satellite) when
+  it is installed, started on the first X11 connection as niri does, rather than built-in XWayland.
+  Their app id is their WM_CLASS, e.g. `XTerm`.
 - Keyboard move/resize can't warp the host pointer, so they follow pointer movement from wherever it is.
 - Configuration is TOML rather than UCL, with the same structure where it applies.
 - New views are placed centered on the pointer; their group defaults to their app id.
@@ -111,7 +141,7 @@ cargo test     # unit tests
 mouse input through sway's virtual input protocols, opens test windows that fill themselves with a
 solid color, and checks pixels in screenshots taken with `grim`. They cover tiling, cycling,
 maximizing, sheets, marks, groups, modes, mouse and keyboard move/resize, client-requested
-move/resize, snapping, input grabs, reload, quit, and the bar and menu.
+move/resize, snapping, input grabs, reload, quit, the bar and menu, and wallpapers.
 
 They need sway and grim, so plain `cargo test` skips them. Run them with:
 
