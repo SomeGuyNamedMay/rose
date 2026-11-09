@@ -171,6 +171,30 @@ impl Rose {
         self.move_pointer(center, 0);
     }
 
+    /// Leaves the modes that wait for keys and lets go of held keys, since a nested Rose never
+    /// hears about keys released while its window is unfocused.
+    pub fn host_focus_lost(&mut self) {
+        self.stop_pan_repeat();
+        if matches!(self.mode, Mode::Pan) {
+            self.exit_pan();
+        }
+        if self.menu.is_some() {
+            self.close_menu();
+        }
+
+        let keyboard = self.seat.get_keyboard().unwrap();
+        for keycode in keyboard.pressed_keys() {
+            let (forward, mods_changed) =
+                keyboard.input_intercept(self, keycode, KeyState::Released, |rose, _, _| {
+                    !rose.suppressed_keys.remove(&keycode.raw())
+                });
+            if forward {
+                let serial = SERIAL_COUNTER.next_serial();
+                keyboard.input_forward(self, keycode, KeyState::Released, serial, 0, mods_changed);
+            }
+        }
+    }
+
     /// Decides whether a key goes to the client, and what the compositor does with it.
     fn filter_key(
         &mut self,
@@ -183,6 +207,16 @@ impl Rose {
         if state == KeyState::Released {
             self.release_pan_key(code);
             let forward = !self.suppressed_keys.remove(&code);
+            // A nested Rose only gets the release of a shortcut the host grabbed, as GNOME does
+            // with Alt+Escape, and Escape must still get out of these modes.
+            let sym = handle.modified_sym();
+            if forward && sym == Keysym::Escape {
+                match self.mode {
+                    Mode::Menu => return (false, Some(KeyCommand::MenuKey(sym, *mods))),
+                    Mode::Pan => return (false, Some(KeyCommand::PanKey(code, sym))),
+                    _ => {}
+                }
+            }
             return (forward, grabbing.then_some(KeyCommand::EndGrab));
         }
 

@@ -108,7 +108,7 @@ impl Rose {
     }
 
     /// Leaves pan mode. Focus doesn't stay on a view that was panned out of sight.
-    fn exit_pan(&mut self) {
+    pub fn exit_pan(&mut self) {
         self.stop_pan_repeat();
         self.mode = Mode::Normal;
         if !self.focused.as_ref().is_some_and(|w| self.on_screen(w)) {
