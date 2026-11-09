@@ -53,7 +53,7 @@ most logo-key shortcuts while Rose runs nested inside them. Some highlights:
 | Alt+1 … Alt+0, Alt+BackSpace | switch to a sheet, or to the alternate sheet |
 | Alt+Shift+1 … Alt+Shift+0 | move the focused view to a sheet |
 | Alt+J / Alt+K | cycle views |
-| Alt+L | pick a layout from the menu (`s`, `q`, `f`, `g`, `m` by default) |
+| Alt+L | pick a layout from the menu |
 | Alt+A / Alt+Shift+L | add views to the layout / reset the layout |
 | Alt+F | toggle maximize |
 | Alt+G, type a name, Return | assign the focused view to a group |

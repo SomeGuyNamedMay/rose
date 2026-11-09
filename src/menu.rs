@@ -88,7 +88,7 @@ impl MenuSource {
                 "Actions",
                 &["Action", "Binding", "Command"],
             ),
-            Self::Layouts => ("Apply layout", "Layouts", &["Register", "Layout"]),
+            Self::Layouts => ("Apply layout", "Layouts", &["Layout"]),
             Self::Wallpaper => (
                 "Set wallpaper",
                 "Requested by an application",
@@ -728,7 +728,7 @@ impl Rose {
                 layouts
                     .into_iter()
                     .map(|(&register, layout)| Item {
-                        columns: vec![register.to_string(), layout.describe()],
+                        columns: vec![layout.describe()],
                         target: Target::Action(Action::LayoutApply(register)),
                     })
                     .collect()
